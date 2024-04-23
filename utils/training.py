@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from datasets.utils import BaseDataset
-from global_consts import LOG_LOSS_INTERVAL
+from utils.global_consts import LOG_LOSS_INTERVAL
 
 from typing import Iterator, List, Tuple
 
@@ -20,9 +20,7 @@ def get_time_str(delta_time: int):
     delta_days = int(delta_time // (24 * 3600))
 
     delta_time_str = ""
-    for remaining, unity in zip(
-        [delta_days, delta_hours, delta_minutes], ["d", "h", "m"]
-    ):
+    for remaining, unity in zip([delta_days, delta_hours, delta_minutes], ["d", "h", "m"]):
         if remaining > 0:
             delta_time_str += f" {remaining}{unity}"
     if delta_days == 0 and delta_hours == 0:
@@ -93,8 +91,7 @@ def train(
                         train_loss = model.observe(inputs, labels)
 
                         if i % LOG_LOSS_INTERVAL == 0 or (
-                            i == len(train_loader) - 1
-                            and epoch == args["num_epochs"] - 1
+                            i == len(train_loader) - 1 and epoch == args["num_epochs"] - 1
                         ):
                             progress_bar(
                                 task + 1,
@@ -118,10 +115,7 @@ def train(
             evaluate(fabric, task, model, dataset)
             server_model.end_round_server(client_info)
 
-            if (
-                epoch % args["checkpoint_interval"] == 0
-                or (comm_round + 1) == args["num_comm_rounds"]
-            ):
+            if epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
 
         server_model.end_task()

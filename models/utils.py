@@ -1,8 +1,6 @@
 import os
 from typing import List
 import torch
-from torch.optim import AdamW, SGD
-import lightning as L
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -13,17 +11,15 @@ class BaseModel(nn.Module):
         fabric,
         network: nn.Module,
         device: str,
-        optimizer: str = "AdamW",
-        lr: float = 1e-4,
-        wd_reg: float = 0,
+        optimizer: str,
+        lr: float,
+        wd_reg: float,
     ):
         super().__init__()
         self.device = device
         self.network = network
         OptimizerClass = getattr(torch.optim, optimizer)
-        self.optimizer = OptimizerClass(
-            self.network.parameters(), lr=lr, weight_decay=wd_reg
-        )
+        self.optimizer = OptimizerClass(self.network.parameters(), lr=lr, weight_decay=wd_reg)
         self.loss = nn.CrossEntropyLoss()
         self.fabric = fabric
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)

@@ -22,14 +22,10 @@ class FedAvg(BaseModel):
         super().__init__(fabric, network, device, optimizer, lr, wd_reg)
         self.avg_type = avg_type
 
-    def observe(
-        self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True
-    ) -> float:
+    def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
-            outputs = self.network(inputs)[
-                :, self.cur_offset : self.cur_offset + self.cpt
-            ]
+            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels % self.cpt)
 
         if update:
@@ -41,21 +37,14 @@ class FedAvg(BaseModel):
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
             total_samples = sum([client["num_train_samples"] for client in client_info])
-            norm_weights = [
-                client["num_train_samples"] / total_samples for client in client_info
-            ]
+            norm_weights = [client["num_train_samples"] / total_samples for client in client_info]
         else:
-            weights = [
-                1 if client["num_train_samples"] > 0 else 0 for client in client_info
-            ]
+            weights = [1 if client["num_train_samples"] > 0 else 0 for client in client_info]
             norm_weights = [w / sum(weights) for w in weights]
         if len(client_info) > 0:
             self.network.set_params(
                 torch.stack(
-                    [
-                        client["params"] * norm_weight
-                        for client, norm_weight in zip(client_info, norm_weights)
-                    ]
+                    [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
                 ).mean(0)
             )
 

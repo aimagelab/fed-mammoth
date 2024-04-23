@@ -1,11 +1,8 @@
-import os
-
-import torch
 from datasets import register_dataset
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR100
 from datasets.utils import BaseDataset
-from global_consts import DATASET_PATH
+from utils.global_consts import DATASET_PATH
 import numpy as np
 
 
@@ -22,8 +19,8 @@ class SequentialCifar100(BaseDataset):
         num_clients: int,
         batch_size: int,
         partition_mode: str,
-        distribution_alpha: float = None,
-        class_quantity: int = None,
+        distribution_alpha: float = 0.05,
+        class_quantity: int = 2,
     ):
         super().__init__(
             num_clients,
@@ -43,9 +40,7 @@ class SequentialCifar100(BaseDataset):
             dataset.targets = np.array(dataset.targets).astype(np.int64)
             setattr(self, f"{split}_dataset", dataset)
 
-        self._split_fcil(
-            num_clients, partition_mode, distribution_alpha, class_quantity
-        )
+        self._split_fcil(num_clients, partition_mode, distribution_alpha, class_quantity)
 
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None

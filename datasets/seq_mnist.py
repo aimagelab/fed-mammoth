@@ -1,11 +1,8 @@
-import os
-
-import numpy as np
 from datasets import register_dataset
 import torchvision.transforms as transforms
 from torchvision.datasets import MNIST
 from datasets.utils import BaseDataset
-from global_consts import DATASET_PATH
+from utils.global_consts import DATASET_PATH
 
 
 @register_dataset("seq-mnist")
@@ -20,9 +17,9 @@ class SequentialMNIST(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
-        partition_mode: str,
-        distribution_alpha: float = None,
-        class_quantity: int = None,
+        partition_mode: str = "distribution",
+        distribution_alpha: float = 0.05,
+        class_quantity: int = 1,
     ):
         super().__init__(
             num_clients,
