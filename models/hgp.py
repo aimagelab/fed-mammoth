@@ -6,7 +6,7 @@ from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
-from networks.vit_prompt_hgp import HGPPrompt
+from networks.vit_prompt_hgp import VitHGP
 
 
 @register_model("hgp")
@@ -14,7 +14,7 @@ class HGP(BaseModel):
     def __init__(
         self,
         fabric,
-        network: HGPPrompt,
+        network: VitHGP,
         device: str,
         optimizer: str = "AdamW",
         lr: float = 3e-3,
@@ -88,7 +88,7 @@ class HGP(BaseModel):
                     counter += client_gaussians[clas][0]
             mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
         self.mogs_per_task[self.cur_task]
-        optimizer = torch.optim.SGD(self.model.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
+        optimizer = torch.optim.SGD(self.network.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
         logits_norm = torch.tensor([], dtype=torch.float32).to(self.device)
         for epoch in range(5):
@@ -97,27 +97,27 @@ class HGP(BaseModel):
             # TODO: fix the prrobabilities of the classes
             # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
             # we can set classes_weights asequiprobable
-            num_classes = (self.cur_task + 1) * self.classes_per_task
+            num_classes = (self.cur_task + 1) * self.cpt
             classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
             classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
             _, classes_samples = torch.unique(classes_samples, return_counts=True)
             # sample features from gaussians:
             for task in range(self.cur_task + 1):
-                for clas in range(self.classes_per_task):
+                for clas in range(self.cpt):
                     weights_list = []
-                    for weight in self.mogs_per_task[task][task * self.classes_per_task + clas][0]:
+                    for weight in self.mogs_per_task[task][task * self.cpt + clas][0]:
                         weights_list.append(weight)
                     gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
                     weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
                     gaussian_samples_fill = torch.multinomial(
-                        weights_list, classes_samples[task * self.classes_per_task + clas], replacement=True
+                        weights_list, classes_samples[task * self.cpt + clas], replacement=True
                     )
                     gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
                     gaussian_samples[gaussian_clients] += gaussian_samples_fill
                     for id, (mean, variance) in enumerate(
                         zip(
-                            self.mogs_per_task[task][task * self.classes_per_task + clas][1],
-                            self.mogs_per_task[task][task * self.classes_per_task + clas][2],
+                            self.mogs_per_task[task][task * self.cpt + clas][1],
+                            self.mogs_per_task[task][task * self.cpt + clas][2],
                         )
                     ):
                         cls_mean = mean  # * (0.9 + decay)
@@ -127,7 +127,7 @@ class HGP(BaseModel):
                         n_samples = int(torch.round(gaussian_samples[id]))
                         sampled_data_single = m.sample((n_samples,))
                         sampled_data.append(sampled_data_single)
-                        sampled_label.extend([clas + task * self.classes_per_task] * n_samples)
+                        sampled_label.extend([clas + task * self.cpt] * n_samples)
             sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
             sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
             inputs = sampled_data
@@ -136,16 +136,16 @@ class HGP(BaseModel):
             sf_indexes = torch.randperm(inputs.size(0))
             inputs = inputs[sf_indexes]
             targets = targets[sf_indexes]
-            crct_num = (self.cur_task + 1) * self.classes_per_task
+            crct_num = (self.cur_task + 1) * self.cpt
             for _iter in range(crct_num):
                 inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                outputs = self.model.last(inp)
+                outputs = self.network.last(inp)
                 logits = outputs
                 per_task_norm = []
                 cur_t_size = 0
                 for _ti in range(self.cur_task + 1):
-                    cur_t_size += self.classes_per_task
+                    cur_t_size += self.cpt
                 temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
                 per_task_norm.append(temp_norm)
                 per_task_norm = torch.cat(per_task_norm, dim=-1)
@@ -167,7 +167,7 @@ class HGP(BaseModel):
         return {
             "params": self.network.get_params(),
             "num_train_samples": len(dataloader.dataset.data),
-            "client_statistics": self.end_round_client(dataloader),
+            "client_statistics": self.clients_statistics,
         }
 
     def get_server_info(self):
