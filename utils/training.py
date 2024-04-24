@@ -112,8 +112,8 @@ def train(
 
             print("Round time:", get_time_str(time() - last_round_time))
             last_round_time = time()
-            evaluate(fabric, task, model, dataset)
             server_model.end_round_server(client_info)
+            evaluate(fabric, task, model, dataset)
 
             if epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
