@@ -6,6 +6,7 @@ import setproctitle
 from argparse import ArgumentParser
 from inspect import signature
 import os
+import getpass
 import lightning as L
 import torch
 import json
@@ -60,7 +61,7 @@ def get_artifacts(args: dict, fabric) -> Tuple[BaseModel, Dataset]:
 def main(args: dict, output_folders_root: str, nickname: str) -> None:
     set_random_seed(42)
 
-    setproctitle.setproctitle(f"{os.getlogin()}_{nickname}")
+    setproctitle.setproctitle(f"{getpass.getuser()}_{nickname}")
 
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     # command = " ".join(sys.argv)
