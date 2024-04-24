@@ -38,6 +38,7 @@ def get_artifacts(args: dict, fabric) -> Tuple[BaseModel, Dataset]:
 
     args["input_shape"] = DatasetClass.INPUT_SHAPE
     args["num_classes"] = DatasetClass.N_CLASSES_PER_TASK * DatasetClass.N_TASKS
+    args["num_tasks"] = DatasetClass.N_TASKS
 
     network_signature = list(signature(NetworkClass.__init__).parameters.keys())[1:]
     dataset_signature = list(signature(DatasetClass.__init__).parameters.keys())[1:]

@@ -14,12 +14,16 @@ class BaseModel(nn.Module):
         optimizer: str,
         lr: float,
         wd_reg: float,
+        params: list = None,
     ):
         super().__init__()
         self.device = device
         self.network = network
         OptimizerClass = getattr(torch.optim, optimizer)
-        self.optimizer = OptimizerClass(self.network.parameters(), lr=lr, weight_decay=wd_reg)
+        if params is None:
+            self.optimizer = OptimizerClass(self.network.parameters(), lr=lr, weight_decay=wd_reg)
+        else:
+            self.optimizer = OptimizerClass(params, lr=lr, weight_decay=wd_reg)
         self.loss = nn.CrossEntropyLoss()
         self.fabric = fabric
         self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
