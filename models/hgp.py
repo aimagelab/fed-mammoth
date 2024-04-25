@@ -68,7 +68,7 @@ class HGP(BaseModel):
                 ).mean(0)
             )
         clients_gaussians = [client["client_statistics"] for client in client_info]
-        mogs = 0
+        mogs = {}
         for clas in range(self.cur_offset, self.cur_offset + self.cpt):
             counter = 0
             for client_gaussians in clients_gaussians:
