@@ -87,7 +87,7 @@ class HGP(BaseModel):
                         mogs[clas][2].append(gaus_var)
                     counter += client_gaussians[clas][0]
             mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
-        self.mogs_per_task[self.cur_task]
+        self.mogs_per_task[self.cur_task] = mogs
         optimizer = torch.optim.SGD(self.network.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
         logits_norm = torch.tensor([], dtype=torch.float32).to(self.device)
