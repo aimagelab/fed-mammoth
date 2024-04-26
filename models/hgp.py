@@ -191,7 +191,8 @@ class HGP(BaseModel):
                 if number > 1:
                     gaussians = []
                     gaussians.append(number)
-                    gaussians.append(torch.mean(features[features[true_labels == client_label]], 0))
-                    gaussians.append(torch.std(features[features[true_labels == client_label]], 0) ** 2)
+                    gaussians.append(torch.mean(features[true_labels == client_label], 0))
+                    gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
+                    print(torch.norm(gaussians[2], p=2))
                     client_statistics[client_label] = gaussians
             self.clients_statistics = client_statistics
