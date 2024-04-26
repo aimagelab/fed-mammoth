@@ -40,6 +40,7 @@ class HGP(BaseModel):
                 p.requires_grad = True
             else:
                 p.requires_grad = False
+        self.logit_norm = 0.1
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
