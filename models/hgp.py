@@ -67,7 +67,7 @@ class HGP(BaseModel):
             self.network.set_params(
                 torch.stack(
                     [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
-                ).mean(0)
+                ).sum(0)
             )
         clients_gaussians = [client["client_statistics"] for client in client_info]
         mogs = {}
