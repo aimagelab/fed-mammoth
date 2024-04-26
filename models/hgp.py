@@ -17,7 +17,7 @@ class HGP(BaseModel):
         network: VitHGP,
         device: str,
         optimizer: str = "AdamW",
-        lr: float = 3e-3,
+        lr: float = 1e-3,
         wd_reg: float = 0,
         avg_type: str = "weighted",
         how_many: int = 256,
@@ -50,6 +50,7 @@ class HGP(BaseModel):
 
         if update:
             self.fabric.backward(loss)
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
 
         return loss.item()
