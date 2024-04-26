@@ -45,7 +45,7 @@ class FedAvg(BaseModel):
             self.network.set_params(
                 torch.stack(
                     [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
-                ).mean(0)
+                ).sum(0)
             )
 
     def begin_round_client(self, _: DataLoader, server_info: dict):
