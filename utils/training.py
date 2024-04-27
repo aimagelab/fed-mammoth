@@ -64,6 +64,7 @@ def train(
 
     os.makedirs(output_folder, exist_ok=True)
 
+    start_time = time()
     last_round_time = time()
     client_info = []
     for task in range(dataset.N_TASKS):
@@ -119,3 +120,4 @@ def train(
                 server_model.save_checkpoint(output_folder, task, comm_round)
 
         server_model.end_task()
+    print("Total Train Time:", get_time_str(time() - start_time))
