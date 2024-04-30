@@ -230,11 +230,11 @@ class HGPRegmean(HGP):
             feature_list = []
             label_list = []
             train_dataset_data = dataloader.dataset.data.copy()
-            train_dataset_targets = dataloader.dataset.target.copy()
+            train_dataset_targets = dataloader.dataset.targets.copy()
             for clas in range(base_class, base_class + self.cpt):
                 counter = 0
                 dataloader.dataset.data = train_dataset_data[train_dataset_targets == clas]
-                dataloader.dataset.target = train_dataset_targets[train_dataset_targets == clas]
+                dataloader.dataset.targets = train_dataset_targets[train_dataset_targets == clas]
                 if len(dataloader.dataset.data) > 5:
                     while counter <= 1000:
                         for inputs, labels in dataloader:
@@ -246,7 +246,7 @@ class HGPRegmean(HGP):
                                 break
 
             dataloader.dataset.data = train_dataset_data
-            dataloader.dataset.target = train_dataset_targets
+            dataloader.dataset.targets = train_dataset_targets
             features = torch.cat(feature_list)
             all_labels = torch.cat(label_list)
             feat_sq, importance = [], []
