@@ -70,7 +70,7 @@ class HGPRegmean(HGP):
         #    for clas in range(base_class, base_class + self.cpt)
         # }
         ssd = self.network.state_dict()
-        client_sd = [c["weights"] for c in client_info]  # clients' weights
+        client_sd = [c["params"] for c in client_info]  # clients' weights
         # Apply regmean
         cls_weight_key = [key for key in self.keys if "last" in key and "weight" in key][0]
         for clas in range(base_class, base_class + self.cpt):
