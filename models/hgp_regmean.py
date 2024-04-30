@@ -56,7 +56,7 @@ class HGPRegmean(HGP):
                     [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
                 ).sum(0)
             )
-        client_feat_sq = [c["client_gram"].to(self.device) for c in client_info]
+        client_feat_sq = [c["client_gram"] for c in client_info]
         base_class = self.cur_task * self.cpt
         clients_per_seen_class = {}
         for clas in range(base_class, base_class + self.cpt):
@@ -87,19 +87,23 @@ class HGPRegmean(HGP):
             clas_importance = []
             for client_idx in clients_per_seen_class[clas]:
                 clas_importance.append(client_info[client_idx]["client_importance"][clas - base_class])
-            norm_importance = torch.tensor([i / sum(clas_importance) for i in clas_importance])
+            norm_importance = torch.tensor([i / sum(clas_importance) for i in clas_importance]).to(self.device)
 
             client_feats_sq = torch.stack(
                 [cfsq[clas - base_class] for cfsq in client_feat_sq if type(cfsq[clas - base_class]) != int]
-            )
+            ).to(self.device)
             norm_client_feats = client_feats_sq * norm_importance.reshape(-1, 1, 1)
             norm_factor = torch.linalg.inv(norm_client_feats.sum(0))
-            ensemble = torch.stack(
-                [
-                    feat_sq @ client_sd[c_idx][cls_weight_key][clas : clas + 1].T * norm_importance[i]
-                    for i, (feat_sq, c_idx) in enumerate(zip(client_feats_sq, clients_per_seen_class[clas]))
-                ]
-            ).sum(0)
+            ensemble = (
+                torch.stack(
+                    [
+                        feat_sq @ client_sd[c_idx][cls_weight_key][clas : clas + 1].T * norm_importance[i]
+                        for i, (feat_sq, c_idx) in enumerate(zip(client_feats_sq, clients_per_seen_class[clas]))
+                    ]
+                )
+                .sum(0)
+                .to(self.device)
+            )
             ssd[cls_weight_key][clas : clas + 1] = (norm_factor @ ensemble).T
 
             # fedavg_class for bias
