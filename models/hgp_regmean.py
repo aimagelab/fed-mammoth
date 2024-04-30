@@ -257,14 +257,15 @@ class HGPRegmean(HGP):
                 counter = 0
                 dataloader.dataset.data = train_dataset_data[train_dataset_targets == clas]
                 dataloader.dataset.targets = train_dataset_targets[train_dataset_targets == clas]
-                while counter <= 1000:
-                    for inputs, labels in dataloader:
-                        inputs = inputs.to(self.device)
-                        label_list.append(labels)
-                        feature_list.append(self.network(inputs, pen=True))
-                        counter += feature_list[-1].shape[0]
-                        if counter >= 1000:
-                            break
+                if len(dataloader.dataset.data) > 0:
+                    while counter <= 1000:
+                        for inputs, labels in dataloader:
+                            inputs = inputs.to(self.device)
+                            label_list.append(labels)
+                            feature_list.append(self.network(inputs, pen=True))
+                            counter += feature_list[-1].shape[0]
+                            if counter >= 1000:
+                                break
 
             dataloader.dataset.data = train_dataset_data
             dataloader.dataset.targets = train_dataset_targets
