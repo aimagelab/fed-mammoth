@@ -72,8 +72,8 @@ class HGPRegmean(HGP):
         ssd = self.network.state_dict()
         client_params = [c["params"] for c in client_info]  # clients' weights
         client_sd = []
-        tmp = 0
         for c in client_params:
+            tmp = 0
             sd = self.network.state_dict()
             for key in sd.keys():
                 size = sd[key].numel()
