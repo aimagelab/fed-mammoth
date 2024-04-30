@@ -226,7 +226,7 @@ class HGPRegmean(HGP):
             #######################################
             # compute features
             base_class = self.cur_task * self.cpt
-            training_status = self.models[self.client_index].training
+            training_status = self.network.training
             feature_list = []
             label_list = []
             train_dataset_data = dataloader.dataset.data.copy()
