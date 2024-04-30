@@ -56,7 +56,7 @@ class HGPRegmean(HGP):
                     [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
                 ).sum(0)
             )
-        client_feat_sq = [c["client_gram"] for c in client_info]
+        client_feat_sq = [c["client_gram"].to(self.device) for c in client_info]
         base_class = self.cur_task * self.cpt
         clients_per_seen_class = {}
         for clas in range(base_class, base_class + self.cpt):
@@ -100,7 +100,7 @@ class HGPRegmean(HGP):
                     for i, (feat_sq, c_idx) in enumerate(zip(client_feats_sq, clients_per_seen_class[clas]))
                 ]
             ).sum(0)
-            ssd[cls_weight_key][clas : clas + 1] = (norm_factor @ ensemble).T.cpu()
+            ssd[cls_weight_key][clas : clas + 1] = (norm_factor @ ensemble).T
 
             # fedavg_class for bias
             cls_bias_key = cls_weight_key.replace("weight", "bias")
@@ -111,6 +111,7 @@ class HGPRegmean(HGP):
                 ]
             )
         self.network.load_state_dict(ssd)
+        del ssd, client_sd, client_feat_sq, clients_per_seen_class, client_info, client_params
         clients_gaussians = [client["client_statistics"] for client in client_info]
         mogs = {}
         for clas in range(self.cur_offset, self.cur_offset + self.cpt):
