@@ -100,7 +100,7 @@ class HGPRegmean(HGP):
                     for i, c_idx in enumerate(clients_per_seen_class[clas])
                 ]
             )
-
+        self.network.load_state_dict(ssd)
         clients_gaussians = [client["client_statistics"] for client in client_info]
         mogs = {}
         for clas in range(self.cur_offset, self.cur_offset + self.cpt):
