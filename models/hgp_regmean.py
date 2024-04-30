@@ -76,7 +76,7 @@ class HGPRegmean(HGP):
         for clas in range(base_class, base_class + self.cpt):
             clas_importance = []
             for client_idx in clients_per_seen_class[clas]:
-                clas_importance.append(client_info[client_idx]["importance"][clas - base_class])
+                clas_importance.append(client_info[client_idx]["client_importance"][clas - base_class])
             norm_importance = torch.tensor([i / sum(clas_importance) for i in clas_importance])
 
             client_feats_sq = torch.stack(
