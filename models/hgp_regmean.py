@@ -56,12 +56,19 @@ class HGPRegmean(HGP):
                     [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
                 ).sum(0)
             )
-        client_feat_sq = [c["feat_sq"] for c in client_info]
+        client_feat_sq = [c["client_gram"] for c in client_info]
         base_class = self.cur_task * self.cpt
-        clients_per_seen_class = {
-            clas: [c["client_index"] for c in client_info if clas in c["seen_classes"]]
-            for clas in range(base_class, base_class + self.cpt)
-        }
+        clients_per_seen_class = {}
+        for clas in range(base_class, base_class + self.cpt):
+            clients_per_seen_class[clas] = []
+            for idx, c in enumerate(client_info):
+                if clas in c["seen_classes"]:
+                    clients_per_seen_class[clas].append(idx)
+
+        # clients_per_seen_class = {
+        #    clas: [c["client_index"] for c in client_info if clas in c["seen_classes"]]
+        #    for clas in range(base_class, base_class + self.cpt)
+        # }
         ssd = self.network.state_dict()
         client_sd = [c["weights"] for c in client_info]  # clients' weights
         # Apply regmean
