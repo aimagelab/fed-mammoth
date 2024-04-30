@@ -115,7 +115,7 @@ class HGPRegmean(HGP):
                 ]
             )
         self.network.load_state_dict(ssd)
-        del ssd, client_sd, client_feat_sq, clients_per_seen_class, client_info, client_params
+        del ssd, client_sd, client_feat_sq, clients_per_seen_class, client_info
         clients_gaussians = [client["client_statistics"] for client in client_info]
         mogs = {}
         for clas in range(self.cur_offset, self.cur_offset + self.cpt):
