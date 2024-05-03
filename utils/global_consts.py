@@ -10,9 +10,10 @@ ADDITIONAL_ARGS = {
     "checkpoint_interval": (int, float("inf")),
     "device": (str, "cuda:0"),
     "output_folders_root": (str, "./output"),
-    "verbose": (bool, True),  # TODO
     # TODO wandb
     "wandb": (bool, True),
     "wandb_project": (str, "FCL"),
     "wandb_entity": (str, "regaz"),
+    # TODO "verbose": (bool, True), # I would remove the creation of the output folder becasue it is not always necessary
+    # TODO "debug_mode": (bool, False),
 }

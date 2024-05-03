@@ -18,7 +18,7 @@ class SequentialCifar100(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
-        partition_mode: str,
+        partition_mode: str = "distribution",
         distribution_alpha: float = 0.05,
         class_quantity: int = 2,
     ):

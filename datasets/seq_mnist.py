@@ -45,6 +45,7 @@ class SequentialMNIST(BaseDataset):
             format="pytorch",
         )
 
+        # TODO: check if this is necessary
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None

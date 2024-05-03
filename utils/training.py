@@ -1,12 +1,10 @@
-from copy import deepcopy
 import os
 import torch
-from torch.utils.data import DataLoader
 
 from datasets.utils import BaseDataset
 from utils.global_consts import LOG_LOSS_INTERVAL
 
-from typing import Iterator, List, Tuple
+from typing import List
 
 from models.utils import BaseModel
 from utils.status import progress_bar
@@ -65,21 +63,21 @@ def train(
     os.makedirs(output_folder, exist_ok=True)
 
     start_time = time()
-    last_round_time = time()
-    client_info = []
     for task in range(dataset.N_TASKS):
         if task < start_task:
             continue
-        train_loaders, test_loaders = dataset.get_cur_dataloaders(task)
+        train_loaders, test_loaders = dataset.get_cur_dataloaders(task)  # TODO: test_loaders are not used
+        last_task_time = time()
         server_model.begin_task(dataset.N_CLASSES_PER_TASK)
         for client_model in client_models:
             client_model.begin_task(dataset.N_CLASSES_PER_TASK)
         for comm_round in range(args["num_comm_rounds"]):
             server_model.begin_round_server()
             server_info = server_model.get_server_info()
-            client_info = []
             if comm_round < start_comm_round:
                 continue
+            clients_info = []
+            last_round_time = time()
             for client_idx in range(args["num_clients"]):
                 train_loader = train_loaders[client_idx]
                 test_loader = test_loaders[client_idx]
@@ -107,17 +105,19 @@ def train(
                             # LOG LOSS HERE
 
                 model.end_round_client(train_loader)
-                client_info.append(model.get_client_info(train_loader))
-                if len(train_loader):
-                    print()
+                clients_info.append(model.get_client_info(train_loader))
 
-            print("Round time:", get_time_str(time() - last_round_time))
-            last_round_time = time()
-            server_model.end_round_server(client_info)
+            print("\nRound time:", get_time_str(time() - last_round_time))
+            server_model.end_round_server(clients_info)
             evaluate(fabric, task, model, dataset)
 
             if epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
 
         server_model.end_task()
-    print("Total Train Time:", get_time_str(time() - start_time))
+        print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
+        print("__________\n")
+
+    # TODO: it is probably needed a final evaluation here. At least for models that do something at the end_task()
+
+    print("\nTotal training time:", get_time_str(time() - start_time))

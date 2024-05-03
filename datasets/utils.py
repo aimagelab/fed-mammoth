@@ -38,8 +38,7 @@ class BaseDataset:
         elif partition_mode == "quantity":
             assert class_quantity is not None
 
-        # logging.info("N = " + str(num_samples_train))
-        num_samples_per_class = []
+        num_samples_per_client = []
         for split in ["train", "test"]:
             dataset = getattr(self, f"{split}_dataset")
             for task in range(0, self.N_TASKS):
@@ -52,7 +51,7 @@ class BaseDataset:
                     trials = 0
                     while trials < 1000:
                         trials += 1
-                        clients_per_class = {clas: list() for clas in cur_classes}
+                        clients_per_class = {cls: list() for cls in cur_classes}
                         classes_set = set()
                         for client_idx in range(num_clients):
                             assert class_quantity <= len(cur_classes)
@@ -81,22 +80,20 @@ class BaseDataset:
 
                         client_distr = torch.distributions.Categorical(torch.tensor(probs))
                         assigned_client = client_distr.sample((num_samples,)).numpy()
-                        num_samples_per_class.append([(assigned_client == i).sum().item() for i in range(num_clients)])
+                        num_samples_per_client.append([(assigned_client == i).sum().item() for i in range(num_clients)])
                     else:
-                        train_test_ratio = sum(num_samples_per_class[clas]) / num_samples
-                        num_samples_per_class[clas] = [
-                            int(round(num_samples_per_class[clas][client_idx] / train_test_ratio))
+                        train_test_ratio = sum(num_samples_per_client[clas]) / num_samples
+                        num_samples_per_client[clas] = [
+                            int(round(num_samples_per_client[clas][client_idx] / train_test_ratio))
                             for client_idx in range(num_clients)
                         ]
                         assigned_client = np.concatenate(
-                            [np.ones((num_samples_per_class[clas][i],), dtype=int) * i for i in range(num_clients)]
+                            [np.ones((num_samples_per_client[clas][i],), dtype=int) * i for i in range(num_clients)]
                         )
                         assigned_client = assigned_client[np.random.permutation(assigned_client.shape[0])]
 
                         value, counts = np.unique(assigned_client, return_counts=True)
-                        sample = value[
-                            torch.distributions.Categorical(torch.tensor(counts)).sample((10,))
-                        ]  # increase this number if not enough examples
+                        sample = value[torch.distributions.Categorical(torch.tensor(counts)).sample((num_clients,))]
                         assigned_client = np.concatenate([assigned_client, sample])
                         assigned_client = assigned_client[:num_samples]
 
@@ -118,7 +115,7 @@ class BaseDataset:
         self.cur_train_loaders, self.cur_test_loaders = [], []
         for split in ["train", "test"]:
             for client_idx in range(self.num_clients):
-                cur_dataset = deepcopy(getattr(self, f"{split}_dataset"))
+                cur_dataset = deepcopy(getattr(self, f"{split}_dataset"))  # TODO: to discuss
                 cur_dataset.data = getattr(self, f"{split}_data")[task][client_idx]
                 cur_dataset.targets = getattr(self, f"{split}_targets")[task][client_idx]
 

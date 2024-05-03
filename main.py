@@ -1,5 +1,4 @@
 import random
-import sys
 from typing import Tuple
 import numpy as np
 import setproctitle
@@ -97,12 +96,15 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--network", type=str, required=True)
 
-    parser.add_argument("--nickname", type=str, required=False)
+    parser.add_argument(
+        "--nickname", type=str, required=False, default="Moscow"
+    )  # TODO: Change this to something more appropriate
+
     args = parser.parse_known_args()[0]
 
-    add_args(parser, args.model, args.network, args.dataset)
-
     args.nickname = str(args.model + "_" + args.dataset + "_" + args.network + "_" + args.nickname)
+
+    add_args(parser, args.model, args.network, args.dataset)
 
     args = {**vars(parser.parse_args()), **vars(args)}
 

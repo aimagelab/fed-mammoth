@@ -26,6 +26,7 @@ class FedAvg(BaseModel):
         self.optimizer.zero_grad()
         with self.fabric.autocast():
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            # TODO: Why in FedAvg we only take a subset of the output? Ci sta, ma ditemi se facevate così sempre in generale
             loss = self.loss(outputs, labels % self.cpt)
 
         if update:

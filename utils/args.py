@@ -20,9 +20,9 @@ EXCLUDE_FROM_ARGS = [
 
 
 def add_args(parser: ArgumentParser, model_name: str, network_name: str, dataset_name: str) -> None:
+    dataset = dataset_factory(dataset_name)
     model = model_factory(model_name)
     network = network_factory(network_name)
-    dataset = dataset_factory(dataset_name)
 
     for module in [model, network, dataset]:
         signature = inspect.signature(module)
