@@ -1,14 +1,13 @@
 import os
 import torch
+import wandb
+from time import time
+from typing import List
 
 from datasets.utils import BaseDataset
 from utils.global_consts import LOG_LOSS_INTERVAL
-
-from typing import List
-
 from models.utils import BaseModel
 from utils.status import progress_bar
-from time import time
 
 
 def get_time_str(delta_time: int):
@@ -40,6 +39,7 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
                     total += labels.shape[0]
 
     print(f"Mean accuracy up to task {task + 1}:", round(correct / total * 100, 2), "%")
+    return round(correct / total * 100, 2)
 
 
 def train(
@@ -50,6 +50,12 @@ def train(
     args: dict,
     output_folder: str,
 ) -> None:
+
+    if args["wandb"]:
+        name = f"{args["dataset"]}_{args["model"]}_rnds{args["num_comm_rounds"]}_clnts{args["num_clients"]}_epchs{args["num_epochs"]}_bs{args["batch_size"]}_lr{args["lr"]}"
+        wandb.init(project=args["wandb_project"], entity=args["wandb_entity"], config=args, name=name)
+        # args.wandb_url = wandb.run.get_url()
+
     if args["checkpoint"] is not None and args["checkpoint"] != "":
         start_task, start_comm_round = server_model.load_checkpoint(args["checkpoint"])
         print(f"Loaded checkpoint at {args['checkpoint']}")
@@ -102,14 +108,15 @@ def train(
                                 args["num_epochs"],
                                 train_loss,
                             )
-                            # LOG LOSS HERE
+                        if args["wandb"]:
+                            wandb.log({"train_loss": train_loss})
 
                 model.end_round_client(train_loader)
                 clients_info.append(model.get_client_info(train_loader))
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
-            evaluate(fabric, task, model, dataset)
+            accuracy = evaluate(fabric, task, model, dataset)
 
             if epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
@@ -118,6 +125,17 @@ def train(
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
         print("__________\n")
 
+        if args["wandb"]:
+            results = {
+                "Mean_accuracy": accuracy,
+                # TODO: add other things here
+            }
+
+            wandb.log(results)
+
     # TODO: it is probably needed a final evaluation here. At least for models that do something at the end_task()
 
     print("\nTotal training time:", get_time_str(time() - start_time))
+
+    if args["wandb"]:
+        wandb.finish()

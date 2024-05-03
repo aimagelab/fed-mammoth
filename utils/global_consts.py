@@ -10,7 +10,6 @@ ADDITIONAL_ARGS = {
     "checkpoint_interval": (int, float("inf")),
     "device": (str, "cuda:0"),
     "output_folders_root": (str, "./output"),
-    # TODO wandb
     "wandb": (bool, True),
     "wandb_project": (str, "FCL"),
     "wandb_entity": (str, "regaz"),

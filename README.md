@@ -21,7 +21,7 @@
 
 ## Some TODOs
 
-+ Add wandb
++ ~~Add wandb~~
 + Add more datasets (e.g., cifar-10, eurosat, tiny-imagenet)
 + Add LoRA
 + Add VeRA
