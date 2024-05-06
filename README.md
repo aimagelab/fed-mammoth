@@ -10,6 +10,7 @@
 ## Datasets
 
 + Sequential MNIST
++ Sequential CIFAR-10
 + Sequential CIFAR-100
 + Many more TODOs
 
@@ -22,7 +23,7 @@
 ## Some TODOs
 
 + ~~Add wandb~~
-+ Add more datasets (e.g., cifar-10, eurosat, tiny-imagenet)
++ Add more datasets (e.g.,~~ cifar-10,~~ eurosat, tiny-imagenet)
 + Add LoRA
 + Add VeRA
 + Add RegMean base approach (i.e., applied to all linear layers, not just the head)

@@ -16,7 +16,7 @@ def progress_bar(
     progress_bar = ("█" * int(20 * progress)) + ("┈" * (20 - int(20 * progress)))
 
     print(
-        "\r{} |{}| tsk {}/{} | rnd {}/{} | clnt {} | epch {}/{} | loss: {}   ".format(
+        "\r{} |{}| Task {}/{} | Round {}/{} | Client {} | Epoch {}/{} | loss: {}   ".format(
             datetime.now().strftime("%m-%d %H:%M"),
             progress_bar,
             task,
@@ -34,4 +34,4 @@ def progress_bar(
     )
 
 
-# TODO: toadjust the visualizaion of the clients
+# TODO: to adjust the visualizaion of the clients

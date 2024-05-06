@@ -6,8 +6,8 @@ from torch.utils.data import DataLoader
 
 class BaseDataset:
     NAME = None
-    N_CLASSES_PER_TASK = 2
-    N_TASKS = 5
+    N_CLASSES_PER_TASK = None
+    N_TASKS = None
     TRAIN_TRANSFORM = None
     TEST_TRANSFORM = None
 

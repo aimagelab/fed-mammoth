@@ -1,15 +1,15 @@
 from datasets import register_dataset
 import torchvision.transforms as transforms
-from torchvision.datasets import CIFAR100
+from torchvision.datasets import CIFAR10
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 import numpy as np
 
 
-@register_dataset("seq-cifar100")
+@register_dataset("seq-cifar10")
 class SequentialCifar100(BaseDataset):
-    N_CLASSES_PER_TASK = 10
-    N_TASKS = 10
+    N_CLASSES_PER_TASK = 2
+    N_TASKS = 5
     TRAIN_TRANSFORM = transforms.ToTensor()
     TEST_TRANSFORM = transforms.ToTensor()
     INPUT_SHAPE = (32, 32, 3)
@@ -20,7 +20,7 @@ class SequentialCifar100(BaseDataset):
         batch_size: int,
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.05,
-        class_quantity: int = 2,
+        class_quantity: int = 1,
     ):
         super().__init__(
             num_clients,
@@ -30,7 +30,7 @@ class SequentialCifar100(BaseDataset):
             class_quantity,
         )
         for split in ["train", "test"]:
-            dataset = CIFAR100(
+            dataset = CIFAR10(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,

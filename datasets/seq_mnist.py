@@ -11,7 +11,7 @@ class SequentialMNIST(BaseDataset):
     N_TASKS = 5
     TRAIN_TRANSFORM = transforms.ToTensor()
     TEST_TRANSFORM = transforms.ToTensor()
-    INPUT_SHAPE = (1, 28, 28)
+    INPUT_SHAPE = (28, 28)
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class SequentialMNIST(BaseDataset):
             format="pytorch",
         )
 
-        # TODO: check if this is necessary
+        # TODO: check if this is necessary, I mean if there is not a more efficient way
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
