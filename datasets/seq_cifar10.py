@@ -7,7 +7,7 @@ import numpy as np
 
 
 @register_dataset("seq-cifar10")
-class SequentialCifar100(BaseDataset):
+class SequentialCifar10(BaseDataset):
     N_CLASSES_PER_TASK = 2
     N_TASKS = 5
     TRAIN_TRANSFORM = transforms.ToTensor()
