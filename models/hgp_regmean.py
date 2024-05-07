@@ -242,7 +242,6 @@ class HGPRegmean(HGP):
                     gaussians.append(number)
                     gaussians.append(torch.mean(features[true_labels == client_label], 0))
                     gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
-                    print(number, torch.norm(gaussians[1], p=2), torch.norm(gaussians[2], p=2))
                     client_statistics[client_label] = gaussians
             self.clients_statistics = client_statistics
             #######################################
@@ -257,7 +256,7 @@ class HGPRegmean(HGP):
                 counter = 0
                 dataloader.dataset.data = train_dataset_data[train_dataset_targets == clas]
                 dataloader.dataset.targets = train_dataset_targets[train_dataset_targets == clas]
-                if len(dataloader.dataset.data) > 0:
+                if len(dataloader.dataset.data) > 5:
                     while counter <= 1000:
                         for inputs, labels in dataloader:
                             inputs = inputs.to(self.device)
@@ -266,6 +265,9 @@ class HGPRegmean(HGP):
                             counter += feature_list[-1].shape[0]
                             if counter >= 1000:
                                 break
+                else:
+                    label_list.append(torch.tensor([]))
+                    feature_list.append(torch.tensor([]))
 
             dataloader.dataset.data = train_dataset_data
             dataloader.dataset.targets = train_dataset_targets

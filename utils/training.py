@@ -95,7 +95,6 @@ def train(
                 for epoch in range(args["num_epochs"]):
                     for i, (inputs, labels) in enumerate(train_loader):
                         train_loss = model.observe(inputs, labels)
-
                         if i % LOG_LOSS_INTERVAL == 0 or (
                             i == len(train_loader) - 1 and epoch == args["num_epochs"] - 1
                         ):
@@ -117,7 +116,7 @@ def train(
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
-            accuracy = evaluate(fabric, task, model, dataset)
+            accuracy = evaluate(fabric, task, server_model, dataset)
 
             if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args["debug_mode"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
