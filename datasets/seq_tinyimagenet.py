@@ -1,56 +1,68 @@
-import os
-import sys
-import requests
-import zipfile
-import io
-from torch.utils.data import Dataset
-import google_drive_downloader as gdd
-import pandas as pd
-import json
-from PIL import Image
 import numpy as np
 import torchvision.transforms as transforms
-from torchvision.transforms.functional import InterpolationMode
+from torch.utils.data import Dataset
+from PIL import Image
+import os
+import sys
+from onedrivedownloader import download as onedrive_download
 
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 
 
-class MyEuroSAT(Dataset):
-    def __init__(self, root: str, train: bool = True, transform: transforms = None, download: bool = True) -> None:
+class MyTinyImageNet(Dataset):
+    def __init__(
+        self,
+        root: str,
+        train: bool = True,
+        transform: transforms = None,
+        download: bool = True,
+    ) -> None:
         self.root = root
         self.train = train
         self.transform = transform
+        self.download = download
 
-        if not os.path.exists(self.root + "/EuroSAT_RGB") and download:
-            print("Downloading EuroSAT...", file=sys.stderr)
-            # Downlaod zip from https://zenodo.org/records/7711810/files/EuroSAT_RGB.zip?download=1
-            # and extract to ../data/EuroSAT_RGB
-            r = requests.get("https://zenodo.org/records/7711810/files/EuroSAT_RGB.zip?download=1")
-            z = zipfile.ZipFile(io.BytesIO(r.content))
-            z.extractall(self.root)
-
-            # downlaod split file form https://drive.google.com/file/d/1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o/
-            gdd.GoogleDriveDownloader.download_file_from_google_drive(
-                file_id="1Ip7yaCWFi0eaOFUGga0lUdVi_DDQth1o", dest_path=self.root + "/EuroSAT_RGB/split.json"
+        if not os.path.exists(self.root + "/TinyImageNet") and self.download:
+            ln = '<iframe src="https://onedrive.live.com/embed?cid=D3924A2D106E0039&resid=D3924A2D106E0039%21111&authkey=AJ9v0OmtrqOpxFA" width="98" height="120" frameborder="0" scrolling="no"></iframe>'
+            print("Downloading TinyImageNet...", file=sys.stderr)
+            onedrive_download(
+                ln,
+                filename=os.path.join(self.root, "tiny-imagenet-processed.zip"),
+                unzip=True,
+                unzip_path=self.root + "/TinyImageNet",
+                clean=True,
             )
 
-            print("Done.", file=sys.stderr)
+        self.data = []
+        for num in range(20):
+            self.data.append(
+                np.load(
+                    os.path.join(
+                        self.root + "/TinyImageNet",
+                        "processed/x_%s_%02d.npy" % ("train" if self.train else "val", num + 1),
+                    )
+                )
+            )
+        self.data = np.concatenate(np.array(self.data))
 
-        self.data_split = pd.DataFrame(
-            json.load(open(self.root + "/EuroSAT_RGB/split.json", "r"))["train" if self.train == True else "test"]
-        )
-
-        self.data = np.array(
-            [Image.open(self.root + "/EuroSAT_RGB/" + img).convert("RGB") for img in self.data_split[0].values]
-        )
-        self.targets = self.data_split[1].values
+        self.targets = []
+        for num in range(20):
+            self.targets.append(
+                np.load(
+                    os.path.join(
+                        self.root + "/TinyImageNet",
+                        "processed/y_%s_%02d.npy" % ("train" if self.train else "val", num + 1),
+                    )
+                )
+            )
+        self.targets = np.concatenate(np.array(self.targets))
 
     def __len__(self):
-        return len(self.targets)
+        return len(self.data)
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
 
         # doing this to have a PIL Image for the transforms
@@ -64,12 +76,22 @@ class MyEuroSAT(Dataset):
         return img, target
 
 
-@register_dataset("seq-eurosat")
-class SequentialEuroSAT(BaseDataset):
-    N_CLASSES_PER_TASK = 2
-    N_TASKS = 5
+@register_dataset("seq-tinyimagenet")
+class SequentialTinyImageNet(BaseDataset):
+    N_CLASSES_PER_TASK = 20
+    N_TASKS = 10
 
-    MEAN, STD = [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]
+    MEAN, STD = (0.4802, 0.4480, 0.3975), (0.2770, 0.2691, 0.2821)
+    """
+    TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomCrop(64, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(MEAN, STD),
+        ]
+    )
+    """
     normalize = transforms.Normalize(mean=MEAN, std=STD)
     TRAIN_TRANSFORM = transforms.Compose(
         # transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
@@ -96,7 +118,7 @@ class SequentialEuroSAT(BaseDataset):
         batch_size: int,
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.05,
-        class_quantity: int = 1,
+        class_quantity: int = 4,
     ):
         super().__init__(
             num_clients,
@@ -107,7 +129,7 @@ class SequentialEuroSAT(BaseDataset):
         )
 
         for split in ["train", "test"]:
-            dataset = MyEuroSAT(
+            dataset = MyTinyImageNet(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
