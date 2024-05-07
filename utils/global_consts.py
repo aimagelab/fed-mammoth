@@ -1,3 +1,6 @@
+from utils.tools import str_to_bool
+
+
 LOG_LOSS_INTERVAL = 10
 DATASET_PATH = "./data"
 
@@ -10,7 +13,7 @@ ADDITIONAL_ARGS = {
     "checkpoint_interval": (int, float("inf")),
     "device": (str, "cuda:0"),
     "output_folders_root": (str, "./output"),
-    "wandb": (bool, True),
+    "wandb": (str_to_bool, True),
     "wandb_project": (str, "FCL"),
     "wandb_entity": (str, "regaz"),
     # TODO "verbose": (bool, True), # I would remove the creation of the output folder becasue it is not always necessary
