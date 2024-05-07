@@ -66,7 +66,8 @@ def train(
     for client_model in client_models:
         client_model.train()
 
-    os.makedirs(output_folder, exist_ok=True)
+    if not args["debug_mode"]:
+        os.makedirs(output_folder, exist_ok=True)
 
     start_time = time()
     for task in range(dataset.N_TASKS):
@@ -118,7 +119,7 @@ def train(
             server_model.end_round_server(clients_info)
             accuracy = evaluate(fabric, task, model, dataset)
 
-            if epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]:
+            if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args["debug_mode"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
 
         server_model.end_task()

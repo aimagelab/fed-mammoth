@@ -65,7 +65,8 @@ def main(args: dict, output_folders_root: str, nickname: str) -> None:
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     # command = " ".join(sys.argv)
     output_folder = os.path.join(output_folders_root, f"{timestamp}_{nickname}")
-    os.makedirs(output_folder)
+    if not args["debug_mode"]:
+        os.makedirs(output_folder)
 
     device = args["device"]
     if "cuda" in device:
@@ -81,8 +82,9 @@ def main(args: dict, output_folders_root: str, nickname: str) -> None:
 
     server_model, client_models, dataset = get_artifacts(args, fabric)
 
-    with open(os.path.join(output_folder, "config.json"), "w") as f:
-        json.dump(args, f, indent=4)
+    if not args["debug_mode"]:
+        with open(os.path.join(output_folder, "config.json"), "w") as f:
+            json.dump(args, f, indent=4)
 
     train(fabric, server_model, client_models, dataset, args, output_folder)
 

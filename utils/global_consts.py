@@ -16,6 +16,5 @@ ADDITIONAL_ARGS = {
     "wandb": (str_to_bool, True),
     "wandb_project": (str, "FCL"),
     "wandb_entity": (str, "regaz"),
-    # TODO "verbose": (bool, True), # I would remove the creation of the output folder becasue it is not always necessary
-    # TODO "debug_mode": (bool, False),
+    "debug_mode": (str_to_bool, False),
 }
