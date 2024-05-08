@@ -113,7 +113,8 @@ def train(
 
                 model.end_round_client(train_loader)
                 clients_info.append(model.get_client_info(train_loader))
-                print()
+                if len(train_loader):
+                    print()
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
