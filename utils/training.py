@@ -113,12 +113,15 @@ def train(
 
                 model.end_round_client(train_loader)
                 clients_info.append(model.get_client_info(train_loader))
+                print()
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
             accuracy = evaluate(fabric, task, server_model, dataset)
 
-            if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args["debug_mode"]:
+            if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
+                "debug_mode"
+            ]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
 
         server_model.end_task()
