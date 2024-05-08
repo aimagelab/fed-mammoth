@@ -44,8 +44,8 @@ class Lora(BaseModel):
         network: Vit,
         device: str,
         optimizer: str = "AdamW",
-        lr: float = 1e-4,
-        wd_reg: float = 0,
+        lr: float = 3e-4,
+        wd_reg: float = 0.1,
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 16,
@@ -160,10 +160,10 @@ class Lora(BaseModel):
             nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
-        self.cur_B = server_info["cur_B"]
-        self.cur_A = server_info["cur_A"]
-        self.old_A = server_info["old_A"]
-        self.old_B = server_info["old_B"]
+        self.cur_B = deepcopy(server_info["cur_B"])
+        self.cur_A = deepcopy(server_info["cur_A"])
+        self.old_A = deepcopy(server_info["old_A"])
+        self.old_B = deepcopy(server_info["old_B"])
 
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         self.optimizer = OptimizerClass(
@@ -193,17 +193,17 @@ class Lora(BaseModel):
 
     def get_client_info(self, dataloader: DataLoader):
         return {
-            "cur_A": self.cur_A,
-            "cur_B": self.cur_B,
+            "cur_A": deepcopy(self.cur_A),
+            "cur_B": deepcopy(self.cur_B),
             "num_train_samples": len(dataloader.dataset.data),
         }
 
     def get_server_info(self):
         return {
-            "cur_A": self.cur_A,
-            "cur_B": self.cur_B,
-            "old_A": self.old_A,
-            "old_B": self.old_B,
+            "cur_A": deepcopy(self.cur_A),
+            "cur_B": deepcopy(self.cur_B),
+            "old_A": deepcopy(self.old_A),
+            "old_B": deepcopy(self.old_B),
         }
 
     def end_round_server(self, client_info: List[dict]):
