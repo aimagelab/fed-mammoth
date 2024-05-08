@@ -52,7 +52,7 @@ def train(
 ) -> None:
 
     if args["wandb"]:
-        name = f"{args["dataset"]}_{args["model"]}_rnds{args["num_comm_rounds"]}_clnts{args["num_clients"]}_epchs{args["num_epochs"]}_bs{args["batch_size"]}_lr{args["lr"]}"
+        name = f"{args['dataset']}_{args['model']}_rnds{args['num_comm_rounds']}_clnts{args['num_clients']}_epchs{args['num_epochs']}_bs{args['batch_size']}_lr{args['lr']}"
         wandb.init(project=args["wandb_project"], entity=args["wandb_entity"], config=args, name=name)
         # args.wandb_url = wandb.run.get_url()
 
