@@ -7,6 +7,7 @@ from typing import List
 from models.utils import BaseModel
 from networks.vit import VisionTransformer as Vit
 from torch.func import functional_call
+from copy import deepcopy
 
 
 #  ------------------------------------------------------------------------------------------
@@ -90,10 +91,11 @@ class Lora(BaseModel):
         self.avg_type = avg_type
         self.pre_B = {}
         self.pre_A = {}
+        self.pre_network = None
 
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
     def set_optimization(self):
-        self.optimization_dict = dict(self.network.state_dict())
+        self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.lora_keys:
             self.old_B[key].requires_grad = False
             self.old_A[key].requires_grad = False
@@ -132,7 +134,7 @@ class Lora(BaseModel):
         print(f"Number of equal A matrices: {num_equal_A} out of {len(self.lora_keys)}")
 
     def get_optimization_dict(self):
-        optimization_dict = dict(self.network.state_dict())
+        optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.lora_keys:
             self.old_B[key].requires_grad = False
             self.old_A[key].requires_grad = False
@@ -182,7 +184,7 @@ class Lora(BaseModel):
 
         if update:
             self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
             self.optimizer.step()
         return loss.item()
 

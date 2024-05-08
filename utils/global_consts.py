@@ -1,7 +1,7 @@
 from utils.tools import str_to_bool
 
 
-LOG_LOSS_INTERVAL = 10
+LOG_LOSS_INTERVAL = 1
 DATASET_PATH = "./data"
 
 # TRAINING CONFIG TEMPLATE
