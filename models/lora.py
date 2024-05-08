@@ -43,11 +43,11 @@ class Lora(BaseModel):
         network: Vit,
         device: str,
         optimizer: str = "AdamW",
-        lr: float = 3e-4,
+        lr: float = 1e-4,
         wd_reg: float = 0,
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
-        r: int = 8,
+        r: int = 16,
         enable_lora=[True, True, True],
     ) -> None:
         # for LoRA, we keep the mean of the LoRA modules of the old tasks
@@ -182,6 +182,7 @@ class Lora(BaseModel):
 
         if update:
             self.fabric.backward(loss)
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
         return loss.item()
 
