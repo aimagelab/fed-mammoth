@@ -32,6 +32,3 @@ def progress_bar(
         end="",
         flush=True,
     )
-
-
-# TODO: to adjust the visualizaion of the clients
