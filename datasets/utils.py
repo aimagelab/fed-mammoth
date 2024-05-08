@@ -120,6 +120,6 @@ class BaseDataset:
                 cur_dataset.targets = getattr(self, f"{split}_targets")[task][client_idx]
 
                 # TODO: to add in the Dataloader num_workers, shuffle and potentially other params
-                getattr(self, f"cur_{split}_loaders").append(DataLoader(cur_dataset, self.batch_size))
+                getattr(self, f"cur_{split}_loaders").append(DataLoader(cur_dataset, self.batch_size, shuffle=True))
 
         return self.cur_train_loaders, self.cur_test_loaders
