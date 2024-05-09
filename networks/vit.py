@@ -9,9 +9,10 @@ from torch import nn
 class VisionTransformer(BaseNetwork):
 
     def __init__(
-        self, model_name: str = "vit_base_patch16_224.augreg_in21k", num_classes: int = 100, pretrained: bool = False
+        self, model_name: str = "vit_base_patch16_224.augreg_in21k", num_classes: int = 100, pretrained: bool = True
     ):
         super().__init__()
+        print(f"Using ViT: {model_name}\tpretrained: {pretrained}\tnum_classes: {num_classes}")
         # self.model = timm_vit.__dict__[model_name](pretrained=pretrained, num_classes=num_classes)
         self.model = timm.create_model(model_name, pretrained=pretrained, num_classes=num_classes)
 
