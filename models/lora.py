@@ -49,7 +49,8 @@ class Lora(BaseModel):
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 16,
-        enable_lora=[True, True, True],
+        enable_lora: list = [True, True, True],
+        lora_head: bool = False,
     ) -> None:
         # for LoRA, we keep the mean of the LoRA modules of the old tasks
         super().__init__(fabric, network, device, optimizer, lr, wd_reg)
@@ -62,12 +63,16 @@ class Lora(BaseModel):
         self.optimizer_str = optimizer
         self.lr = lr
         self.wd_reg = wd_reg
+        self.lora_head = lora_head
+        self.head_keys = []
         self.old_B = {}
         self.old_A = {}
         self.cur_B = {}
         self.cur_A = {}
         for name, param in network.named_parameters():
             param.requires_grad = False  # freeze all the parameters
+            if not self.lora_head and "head" in name:
+                self.head_keys.append(name)
             if "qkv" in name and "weight" in name:
                 self.lora_keys.append(name)
                 self.lora_ind[name] = torch.zeros((param.shape[0],), dtype=torch.bool).view(len(enable_lora), -1)
@@ -78,7 +83,11 @@ class Lora(BaseModel):
                 self.old_A[name] = nn.Parameter(torch.zeros(r * 3, param.shape[1]), requires_grad=False).to(self.device)
                 self.cur_B[name] = nn.Parameter(torch.zeros_like(self.old_B[name]), requires_grad=True).to(self.device)
                 self.cur_A[name] = nn.Parameter(torch.zeros_like(self.old_A[name]), requires_grad=True).to(self.device)
-            elif ("mlp" in name and "weight" in name) or ("proj" in name and "weight" in name and "attn" in name):
+            elif (
+                ("mlp" in name and "weight" in name)
+                or ("proj" in name and "weight" in name and "attn" in name)
+                or (self.lora_head and "head" in name and "weight" in name)
+            ):
                 self.lora_keys.append(name)
                 self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
                 self.old_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=False).to(self.device)
@@ -135,6 +144,9 @@ class Lora(BaseModel):
 
     def get_optimization_dict(self):
         optimization_dict = deepcopy(dict(self.network.state_dict()))
+        if not self.lora_head:
+            for key in self.head_keys:
+                optimization_dict[key].requires_grad = True
         for key in self.lora_keys:
             self.old_B[key].requires_grad = False
             self.old_A[key].requires_grad = False
@@ -150,6 +162,9 @@ class Lora(BaseModel):
                 optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
         return optimization_dict
 
+    def get_dummy_optimization_dict(self):
+        return deepcopy(dict(self.network.named_parameters()))
+
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
         for key in self.lora_keys:
@@ -164,11 +179,31 @@ class Lora(BaseModel):
         self.cur_A = deepcopy(server_info["cur_A"])
         self.old_A = deepcopy(server_info["old_A"])
         self.old_B = deepcopy(server_info["old_B"])
+        if not self.lora_head:
+            self.network.model.head.load_state_dict(server_info["head"])
+            for p in self.network.model.head.parameters():
+                p.requires_grad = True
 
+        # for p in self.network.parameters():
+        #    p.requires_grad = True
+        #
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
-        self.optimizer = OptimizerClass(
-            list(self.cur_B.values()) + list(self.cur_A.values()), lr=self.lr, weight_decay=self.wd_reg
-        )
+        # self.optimizer = OptimizerClass(pow
+        #    list(self.network.parameters()),
+        #    lr=self.lr,
+        #    weight_decay=self.wd_reg,
+        # )
+        if not self.lora_head:
+            self.optimizer = OptimizerClass(
+                list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.network.model.head.parameters()),
+                lr=self.lr,
+                weight_decay=self.wd_reg,
+            )
+        else:
+            self.optimizer = OptimizerClass(
+                list(self.cur_B.values()) + list(self.cur_A.values()), lr=self.lr, weight_decay=self.wd_reg
+            )
+        self.optimizer = self.fabric.setup_optimizers(self.optimizer)
 
     def begin_round_server(self):
         return super().begin_round_server()
@@ -176,6 +211,7 @@ class Lora(BaseModel):
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict()
+        # optimization_dict = self.get_dummy_optimization_dict()
         with self.fabric.autocast():
             outputs = functional_call(self.network, optimization_dict, inputs)[
                 :, self.cur_offset : self.cur_offset + self.cpt
@@ -184,7 +220,7 @@ class Lora(BaseModel):
 
         if update:
             self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
+            # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
             self.optimizer.step()
         return loss.item()
 
@@ -192,19 +228,25 @@ class Lora(BaseModel):
         return functional_call(self.network, self.optimization_dict, x)
 
     def get_client_info(self, dataloader: DataLoader):
-        return {
+        client_info = {
             "cur_A": deepcopy(self.cur_A),
             "cur_B": deepcopy(self.cur_B),
             "num_train_samples": len(dataloader.dataset.data),
         }
+        if not self.lora_head:
+            client_info["head"] = deepcopy(self.network.model.head.state_dict())
+        return client_info
 
     def get_server_info(self):
-        return {
+        server_info = {
             "cur_A": deepcopy(self.cur_A),
             "cur_B": deepcopy(self.cur_B),
             "old_A": deepcopy(self.old_A),
             "old_B": deepcopy(self.old_B),
         }
+        if not self.lora_head:
+            server_info["head"] = deepcopy(self.network.model.head.state_dict())
+        return server_info
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -215,6 +257,15 @@ class Lora(BaseModel):
             norm_weights = [w / sum(weights) for w in weights]
         cl_B = [client["cur_B"] for client in client_info]  # list of B matrices for all clients
         cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
+        if not self.lora_head:
+            heads = [client["head"] for client in client_info]  # list of head matrices for all clients
+            head_sd = self.network.model.head.state_dict()
+            for key in head_sd.keys():
+                head_sd[key] = torch.stack(
+                    [head[key] * norm_weight for head, norm_weight in zip(heads, norm_weights)]
+                ).sum(0)
+            self.network.model.head.load_state_dict(head_sd)
+
         if len(client_info) > 0:
             for key in self.lora_keys:
                 self.cur_B[key] = nn.Parameter(
@@ -223,4 +274,5 @@ class Lora(BaseModel):
                 self.cur_A[key] = nn.Parameter(
                     torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_A, norm_weights)]).sum(0)
                 )
+
         self.set_optimization()

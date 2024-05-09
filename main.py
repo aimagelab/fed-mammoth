@@ -76,7 +76,7 @@ def main(args: dict, output_folders_root: str, nickname: str) -> None:
         accelerator=device,
         devices=1 if device == "cpu" else [int(index)],
         strategy="dp",
-        precision="16-mixed",
+        precision=args["precision"],
     )
     fabric.launch()
 

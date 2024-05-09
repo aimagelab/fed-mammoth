@@ -17,4 +17,5 @@ ADDITIONAL_ARGS = {
     "wandb_project": (str, "FCL"),
     "wandb_entity": (str, "regaz"),
     "debug_mode": (str_to_bool, False),
+    "precision": (str, "16-mixed"),
 }
