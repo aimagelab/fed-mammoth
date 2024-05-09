@@ -8,6 +8,7 @@ from models.utils import BaseModel
 from networks.vit import VisionTransformer as Vit
 from torch.func import functional_call
 from copy import deepcopy
+from utils.tools import str_to_bool
 
 
 #  ------------------------------------------------------------------------------------------
@@ -50,7 +51,7 @@ class Lora(BaseModel):
         lora_alpha: float = 1.0,
         r: int = 16,
         enable_lora: list = [True, True, True],
-        lora_head: bool = False,
+        lora_head: str_to_bool = True,
     ) -> None:
         # for LoRA, we keep the mean of the LoRA modules of the old tasks
         super().__init__(fabric, network, device, optimizer, lr, wd_reg)
