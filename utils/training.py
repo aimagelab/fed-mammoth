@@ -8,21 +8,7 @@ from datasets.utils import BaseDataset
 from utils.global_consts import LOG_LOSS_INTERVAL
 from models.utils import BaseModel
 from utils.status import progress_bar
-
-
-def get_time_str(delta_time: int):
-    delta_seconds = int(delta_time % 60)
-    delta_minutes = int((delta_time // 60) % 60)
-    delta_hours = int((delta_time // 3600) % 24)
-    delta_days = int(delta_time // (24 * 3600))
-
-    delta_time_str = ""
-    for remaining, unity in zip([delta_days, delta_hours, delta_minutes], ["d", "h", "m"]):
-        if remaining > 0:
-            delta_time_str += f" {remaining}{unity}"
-    if delta_days == 0 and delta_hours == 0:
-        delta_time_str += f" {delta_seconds}s"
-    return delta_time_str[1:]
+from utils.tools import get_time_str
 
 
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
