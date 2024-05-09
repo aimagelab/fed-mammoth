@@ -94,6 +94,7 @@ class BaseDataset:
 
                         value, counts = np.unique(assigned_client, return_counts=True)
                         sample = value[torch.distributions.Categorical(torch.tensor(counts)).sample((num_clients,))]
+                        sample = np.array(sample).reshape(-1)
                         assigned_client = np.concatenate([assigned_client, sample])
                         assigned_client = assigned_client[:num_samples]
 
