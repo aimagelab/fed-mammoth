@@ -15,7 +15,6 @@
 + Sequential Tiny-ImageNet
 + Sequential EuroSAT
 + Sequential ImageNetR
-+ Many more TODOs
 
 ## Models
 
@@ -30,5 +29,7 @@
 + Add LoRA
 + Add VeRA
 + Add RegMean base approach (i.e., applied to all linear layers, not just the head)
++ Do those 4/5 approaches that we wrote down a while ago
 + Augmentations for all datasets
 + Add the possibility to select a learning rate scheduler
++ Manage cases in which a client has no data for a given task and the dataloader is empty

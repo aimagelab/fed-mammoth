@@ -8,7 +8,6 @@ from torchvision.transforms.functional import InterpolationMode
 import urllib.request
 import tarfile
 import google_drive_downloader as gdd
-from typing import Tuple
 import yaml
 
 from datasets import register_dataset
@@ -62,12 +61,12 @@ class MyImageNetR(Dataset):
 
         self.data = np.array(data_config["data"])
 
-        self.targets = np.array(data_config["targets"])
+        self.targets = np.array(data_config["targets"]).astype(np.int64)
 
     def __len__(self):
         return len(self.targets)
 
-    def __getitem__(self, index: int):  # -> Tuple[type(Image), type(Image)]:
+    def __getitem__(self, index: int):
         img, target = self.data[index], self.targets[index]
 
         img = Image.open(img).convert("RGB")
@@ -102,7 +101,7 @@ class SequentialImageNet(BaseDataset):
         ]
     )
 
-    INPUT_SHAPE = (64, 64, 3)
+    INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,

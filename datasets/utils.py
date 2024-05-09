@@ -115,7 +115,9 @@ class BaseDataset:
         self.cur_train_loaders, self.cur_test_loaders = [], []
         for split in ["train", "test"]:
             for client_idx in range(self.num_clients):
-                cur_dataset = deepcopy(getattr(self, f"{split}_dataset"))  # TODO: to discuss
+                cur_dataset = deepcopy(
+                    getattr(self, f"{split}_dataset")
+                )  # TODO: to discuss, I mean it's a deepcopy of a None object?
                 cur_dataset.data = getattr(self, f"{split}_data")[task][client_idx]
                 cur_dataset.targets = getattr(self, f"{split}_targets")[task][client_idx]
 

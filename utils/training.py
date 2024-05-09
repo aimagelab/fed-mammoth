@@ -95,6 +95,9 @@ def train(
                 for epoch in range(args["num_epochs"]):
                     for i, (inputs, labels) in enumerate(train_loader):
                         train_loss = model.observe(inputs, labels)
+                        assert not torch.isnan(
+                            torch.tensor(train_loss)
+                        ), f"Loss is NaN at task {task}, round{comm_round}, client {client_idx} and epoch {epoch}."
                         if i % LOG_LOSS_INTERVAL == 0 or (
                             i == len(train_loader) - 1 and epoch == args["num_epochs"] - 1
                         ):

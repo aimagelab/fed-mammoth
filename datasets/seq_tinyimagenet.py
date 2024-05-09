@@ -57,7 +57,7 @@ class MyTinyImageNet(Dataset):
                     )
                 )
             )
-        self.targets = np.concatenate(np.array(self.targets))
+        self.targets = np.concatenate(np.array(self.targets)).astype(np.int64)
 
     def __len__(self):
         return len(self.data)

@@ -15,7 +15,7 @@ class FedAvg(BaseModel):
         network: nn.Module,
         device: str,
         optimizer: str = "AdamW",
-        lr: float = 1e-4,
+        lr: float = 3e-4,
         wd_reg: float = 0,
         avg_type: str = "weighted",
     ) -> None:
