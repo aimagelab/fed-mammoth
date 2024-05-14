@@ -77,6 +77,7 @@ def train(
                 train_loader = fabric.setup_dataloaders(train_loader)
                 test_loader = fabric.setup_dataloaders(test_loader)
                 model = client_models[client_idx]
+                model.to("cuda")
                 model.begin_round_client(train_loader, server_info)
                 for epoch in range(args["num_epochs"]):
                     for i, (inputs, labels) in enumerate(train_loader):
@@ -101,6 +102,7 @@ def train(
                             wandb.log({"train_loss": train_loss})
 
                 model.end_round_client(train_loader)
+                model.to("cpu")
                 clients_info.append(model.get_client_info(train_loader))
                 if len(train_loader):
                     print()

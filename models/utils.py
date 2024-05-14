@@ -82,3 +82,7 @@ class BaseModel(nn.Module):
 
     def get_server_info(self):
         pass
+
+    def to(self, device):
+        # self.device = device
+        self.network.to(device)
