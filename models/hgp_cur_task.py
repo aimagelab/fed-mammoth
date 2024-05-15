@@ -70,6 +70,7 @@ class HGPCurTask(BaseModel):
                 ).sum(0)
             )
         clients_gaussians = [client["client_statistics"] for client in client_info]
+        self.to(self.device)
         mogs = {}
         for clas in range(self.cur_offset, self.cur_offset + self.cpt):
             counter = 0

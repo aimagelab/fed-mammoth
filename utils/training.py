@@ -109,8 +109,8 @@ def train(
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
+            server_model.to("cuda")
             accuracy = evaluate(fabric, task, server_model, dataset)
-
             if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
                 "debug_mode"
             ]:
