@@ -7,10 +7,12 @@ from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
 from networks.vit_prompt_hgp import VitHGP
+from utils.tools import str_to_bool
+from models.hgp import HGP
 
 
 @register_model("hgp_old_tasks")
-class HGPOldTasks(BaseModel):
+class HGPOldTasks(HGP):
     def __init__(
         self,
         fabric,
@@ -21,39 +23,11 @@ class HGPOldTasks(BaseModel):
         wd_reg: float = 0,
         avg_type: str = "weighted",
         how_many: int = 256,
+        full_cov: str_to_bool = False,
+        linear_probe: str_to_bool = False,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
-        super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
-        # self.optimizer = None
-        # self.optimizer = torch.optim.AdamW(
-        #    [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}],
-        #    lr=lr,
-        #    weight_decay=wd_reg,
-        # )
-        # self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
-        self.avg_type = avg_type
-        self.how_many = how_many
-        self.clients_statistics = None
-        self.mogs_per_task = {}
-        for n, p in self.network.named_parameters():
-            if "prompt" in n or "last" in n:
-                p.requires_grad = True
-            else:
-                p.requires_grad = False
-        self.logit_norm = 0.1
-
-    def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
-        self.optimizer.zero_grad()
-        with self.fabric.autocast():
-            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
-
-        if update:
-            self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
-            self.optimizer.step()
-
-        return loss.item()
+        super().__init__(fabric, network, device, optimizer, lr, wd_reg, avg_type, how_many, full_cov, linear_probe)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -165,38 +139,3 @@ class HGPOldTasks(BaseModel):
                     loss.backward()
                     optimizer.step()
                 scheduler.step()
-
-    def begin_round_client(self, _: DataLoader, server_info: dict):
-        self.network.set_params(server_info["params"])
-
-    def get_client_info(self, dataloader: DataLoader):
-        return {
-            "params": self.network.get_params(),
-            "num_train_samples": len(dataloader.dataset.data),
-            "client_statistics": self.clients_statistics,
-        }
-
-    def get_server_info(self):
-        return {"params": self.network.get_params()}
-
-    def end_round_client(self, dataloader: DataLoader):
-        features = torch.tensor([], dtype=torch.float32).to(self.device)
-        true_labels = torch.tensor([], dtype=torch.int64).to(self.device)
-        with torch.no_grad():
-            client_statistics = {}
-            for data in dataloader:
-                inputs, labels = data
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                outputs = self.network(inputs, pen=True, train=False)
-                features = torch.cat((features, outputs), 0)
-                true_labels = torch.cat((true_labels, labels), 0)
-            client_labels = torch.unique(true_labels).tolist()
-            for client_label in client_labels:
-                number = (true_labels == client_label).sum().item()
-                if number > 1:
-                    gaussians = []
-                    gaussians.append(number)
-                    gaussians.append(torch.mean(features[true_labels == client_label], 0))
-                    gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
-                    client_statistics[client_label] = gaussians
-            self.clients_statistics = client_statistics
