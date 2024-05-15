@@ -7,6 +7,8 @@ from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
 from networks.vit_prompt_hgp import VitHGP
+import os
+from utils.tools import str_to_bool
 
 
 @register_model("hgp")
@@ -21,16 +23,11 @@ class HGP(BaseModel):
         wd_reg: float = 0,
         avg_type: str = "weighted",
         how_many: int = 256,
+        full_cov: str_to_bool = False,
+        linear_probe: str_to_bool = False,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
         super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
-        # self.optimizer = None
-        # self.optimizer = torch.optim.AdamW(
-        #    [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}],
-        #    lr=lr,
-        #    weight_decay=wd_reg,
-        # )
-        # self.network, self.optimizer = self.fabric.setup(self.network, self.optimizer)
         self.avg_type = avg_type
         self.how_many = how_many
         self.clients_statistics = None
@@ -41,6 +38,9 @@ class HGP(BaseModel):
             else:
                 p.requires_grad = False
         self.logit_norm = 0.1
+        self.full_cov = full_cov
+        self.do_linear_probe = linear_probe
+        self.done_linear_probe = False
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -54,6 +54,23 @@ class HGP(BaseModel):
             self.optimizer.step()
 
         return loss.item()
+
+    def linear_probe(self, dataloader: DataLoader):
+        for epoch in range(5):
+            for inputs, labels in dataloader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                with torch.no_grad():
+                    pre_logits = self.network(inputs, pen=True, train=False)
+                outputs = self.network.last(pre_logits)
+                loss = F.cross_entropy(outputs, labels)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+    def begin_task(self, n_classes_per_task: int):
+        super().begin_task(n_classes_per_task)
+        if self.do_linear_probe:
+            self.done_linear_probe = False
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -97,7 +114,7 @@ class HGP(BaseModel):
         for epoch in range(5):
             sampled_data = []
             sampled_label = []
-            # TODO: fix the prrobabilities of the classes
+            # TODO: fix the probabilities of the classes
             # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
             # we can set classes_weights asequiprobable
             num_classes = (self.cur_task + 1) * self.cpt
@@ -125,7 +142,10 @@ class HGP(BaseModel):
                     ):
                         cls_mean = mean  # * (0.9 + decay)
                         cls_var = variance
-                        cov = torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var * 3
+                        if self.full_cov:
+                            cov = cls_var
+                        else:
+                            cov = torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var * 3
                         m = MultivariateNormal(cls_mean, cov)
                         n_samples = int(torch.round(gaussian_samples[id]))
                         sampled_data_single = m.sample((n_samples,))
@@ -163,8 +183,17 @@ class HGP(BaseModel):
                 optimizer.step()
             scheduler.step()
 
-    def begin_round_client(self, _: DataLoader, server_info: dict):
+    def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
+        if self.do_linear_probe and not self.done_linear_probe:
+            optimizer = self.optimizer_class(self.network.last.parameters(), lr=1e-3, weight_decay=0)
+            self.optimizer = self.fabric.setup_optimizers(optimizer)
+            self.linear_probe(dataloader)
+            self.done_linear_probe = True
+            # restore correct optimizer
+            params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
+            optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
+            self.optimizer = self.fabric.setup_optimizers(optimizer)
 
     def get_client_info(self, dataloader: DataLoader):
         return {
@@ -181,7 +210,9 @@ class HGP(BaseModel):
         true_labels = torch.tensor([], dtype=torch.int64).to(self.device)
         with torch.no_grad():
             client_statistics = {}
-            for data in dataloader:
+            for id, data in enumerate(dataloader):
+                if id > 15:
+                    break
                 inputs, labels = data
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.network(inputs, pen=True, train=False)
@@ -194,6 +225,26 @@ class HGP(BaseModel):
                     gaussians = []
                     gaussians.append(number)
                     gaussians.append(torch.mean(features[true_labels == client_label], 0))
-                    gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
+                    if self.full_cov:
+                        gaussians.append(torch.cov(features[true_labels == client_label].T).to(self.device))
+                    else:
+                        gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
                     client_statistics[client_label] = gaussians
             self.clients_statistics = client_statistics
+
+    def save_checkpoint(self, output_folder: str, task: int, comm_round: int) -> None:
+        training_status = self.network.training
+        self.network.eval()
+
+        checkpoint = {
+            "task": task,
+            "comm_round": comm_round,
+            "network": self.network,
+            "optimizer": self.optimizer,
+            "mogs": self.mogs_per_task,
+        }
+        name = "hgp_" + "full_cov" if self.full_cov else "diag_cov"
+        name += "_linear_probe" if self.do_linear_probe else ""
+        name += f"_task_{task}_round_{comm_round}_checkpoint.pt"
+        self.fabric.save(os.path.join(output_folder, name), checkpoint)
+        self.network.train(training_status)

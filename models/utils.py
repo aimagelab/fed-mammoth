@@ -20,6 +20,7 @@ class BaseModel(nn.Module):
         self.device = device
         self.network = network
         OptimizerClass = getattr(torch.optim, optimizer)
+        self.optimizer_class = OptimizerClass
         if params is None:
             self.optimizer = OptimizerClass(self.network.parameters(), lr=lr, weight_decay=wd_reg)
         else:
