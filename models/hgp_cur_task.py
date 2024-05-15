@@ -144,6 +144,7 @@ class HGPCurTask(BaseModel):
                 inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt]
+                tgt = tgt % self.cpt
                 logits = outputs
                 per_task_norm = []
                 cur_t_size = 0
