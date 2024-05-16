@@ -53,7 +53,7 @@ class FedAvg(BaseModel):
                 outputs = self.network.last(pre_logits)
                 loss = F.cross_entropy(outputs, labels)
                 self.optimizer.zero_grad()
-                loss.backward()
+                self.fabric.backward(loss)
                 self.optimizer.step()
 
     def end_round_server(self, client_info: List[dict]):

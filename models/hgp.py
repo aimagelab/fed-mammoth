@@ -64,7 +64,7 @@ class HGP(BaseModel):
                 outputs = self.network.last(pre_logits)
                 loss = F.cross_entropy(outputs, labels)
                 self.optimizer.zero_grad()
-                loss.backward()
+                self.fabric.backward(loss)
                 self.optimizer.step()
 
     def begin_task(self, n_classes_per_task: int):
