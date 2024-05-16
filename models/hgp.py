@@ -226,7 +226,11 @@ class HGP(BaseModel):
                     gaussians.append(number)
                     gaussians.append(torch.mean(features[true_labels == client_label], 0))
                     if self.full_cov:
-                        gaussians.append(torch.tensor(torch.cov(features[true_labels == client_label].T), dtype=torch.float64).to(self.device))
+                        gaussians.append(
+                            torch.cov(features[true_labels == client_label].T.type(torch.float64))
+                            .type(torch.float32)
+                            .to(self.device)
+                        )
                     else:
                         gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
                     client_statistics[client_label] = gaussians
