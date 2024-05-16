@@ -21,8 +21,16 @@ class FedAvg(BaseModel):
         wd_reg: float = 0,
         avg_type: str = "weighted",
         linear_probe: str_to_bool = False,
+        slca: str_to_bool = False,
     ) -> None:
-        super().__init__(fabric, network, device, optimizer, lr, wd_reg)
+        self.slca = slca
+        if slca:
+            base_params = [p for n, p in network.named_parameters() if "last" not in n]
+            classifier_params = [p for n, p in network.named_parameters() if "last" in n]
+            params = [{"params": base_params, "lr": lr / 100}, {"params": classifier_params}]
+            super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
+        else:
+            super().__init__(fabric, network, device, optimizer, lr, wd_reg)
         self.avg_type = avg_type
         self.do_linear_probe = linear_probe
         self.done_linear_probe = False
