@@ -62,6 +62,7 @@ class HGP(BaseModel):
                 with torch.no_grad():
                     pre_logits = self.network(inputs, pen=True, train=False)
                 outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
+                labels = labels % self.cpt
                 loss = F.cross_entropy(outputs, labels)
                 self.optimizer.zero_grad()
                 self.fabric.backward(loss)

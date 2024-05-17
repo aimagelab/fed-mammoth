@@ -6,6 +6,8 @@ from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
 from utils.tools import str_to_bool
+from networks.vit_prompt_hgp import VitHGP
+from networks.vit import VisionTransformer
 
 
 @register_model("fedavg")
@@ -24,10 +26,28 @@ class FedAvg(BaseModel):
         slca: str_to_bool = False,
     ) -> None:
         self.slca = slca
-        if slca:
-            base_params = [p for n, p in network.named_parameters() if "last" not in n]
-            classifier_params = [p for n, p in network.named_parameters() if "last" in n]
-            params = [{"params": base_params, "lr": lr / 100}, {"params": classifier_params}]
+        self.lr = lr
+        self.wd = wd_reg
+        if type(network) == VitHGP:
+            for n, p in network.named_parameters():
+                if "prompt" or "last" in n:
+                    p.requires_grad = True
+                else:
+                    p.requires_grad = False
+            params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
+            super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
+        elif type(network) == VisionTransformer:
+            params_backbone = []
+            params_head = []
+            for n, p in network.named_parameters():
+                p.requires_grad = True
+                if "head" not in n:
+                    params_backbone.append(p)
+                else:
+                    params_head.append(p)
+            params = [{"params": params_head}, {"params": params_backbone}]
+            if slca:
+                params = [{"params": params_backbone, "lr": lr / 100}, {"params": params_head}]
             super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
         else:
             super().__init__(fabric, network, device, optimizer, lr, wd_reg)
@@ -59,6 +79,7 @@ class FedAvg(BaseModel):
                 with torch.no_grad():
                     pre_logits = self.network(inputs, pen=True, train=False)
                 outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
+                labels = labels % self.cpt
                 loss = F.cross_entropy(outputs, labels)
                 self.optimizer.zero_grad()
                 self.fabric.backward(loss)
@@ -81,13 +102,13 @@ class FedAvg(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
         if self.do_linear_probe and not self.done_linear_probe:
-            optimizer = self.optimizer_class(self.network.last.parameters(), lr=1e-3, weight_decay=0)
+            optimizer = self.optimizer_class(self.network.last.parameters(), lr=self.lr, weight_decay=self.wd)
             self.optimizer = self.fabric.setup_optimizers(optimizer)
             self.linear_probe(dataloader)
             self.done_linear_probe = True
             # restore correct optimizer
             params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
-            optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
+            optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
             self.optimizer = self.fabric.setup_optimizers(optimizer)
 
     def get_client_info(self, dataloader: DataLoader):
