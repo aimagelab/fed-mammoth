@@ -144,7 +144,7 @@ class HGP(BaseModel):
                         cls_mean = mean  # * (0.9 + decay)
                         cls_var = variance
                         if self.full_cov:
-                            cov = cls_var
+                            cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
                         else:
                             cov = torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var * 3
                         m = MultivariateNormal(cls_mean, cov)
