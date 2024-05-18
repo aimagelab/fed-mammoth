@@ -209,16 +209,16 @@ class HGP(BaseModel):
     def end_round_client(self, dataloader: DataLoader):
         features = torch.tensor([], dtype=torch.float32).to(self.device)
         true_labels = torch.tensor([], dtype=torch.int64).to(self.device)
+        num_epochs = 1 if not self.full_cov else 3
         with torch.no_grad():
             client_statistics = {}
-            for id, data in enumerate(dataloader):
-                if id > 15:
-                    break
-                inputs, labels = data
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                outputs = self.network(inputs, pen=True, train=False)
-                features = torch.cat((features, outputs), 0)
-                true_labels = torch.cat((true_labels, labels), 0)
+            for _ in range(num_epochs):
+                for id, data in enumerate(dataloader):
+                    inputs, labels = data
+                    inputs, labels = inputs.to(self.device), labels.to(self.device)
+                    outputs = self.network(inputs, pen=True, train=False)
+                    features = torch.cat((features, outputs), 0)
+                    true_labels = torch.cat((true_labels, labels), 0)
             client_labels = torch.unique(true_labels).tolist()
             for client_label in client_labels:
                 number = (true_labels == client_label).sum().item()
