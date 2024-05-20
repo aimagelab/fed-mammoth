@@ -413,7 +413,7 @@ class VitHGP(BaseNetwork):
         num_classes: int = 100,
         pretrained: bool = True,
         prompt_param: list = [100, 8],
-        num_tasks: int = 0,
+        num_tasks: int = 10,
     ):
         super().__init__()
         # vit_model = timm_vit.__dict__["vit_base_patch16_224"](pretrained=pretrained, num_classes=num_classes)
@@ -429,8 +429,9 @@ class VitHGP(BaseNetwork):
         )
         # from timm.models import vit_base_patch16_224
         load_dict = timm.create_model(model_name, pretrained=True).state_dict()
-        del load_dict["head.weight"]
-        del load_dict["head.bias"]
+        if not "dino" in model_name:
+            del load_dict["head.weight"]
+            del load_dict["head.bias"]
         vit_model.load_state_dict(load_dict, strict=False)
         self.last = nn.Linear(768, num_classes)
         self.prompt = HGPPrompt(768, num_tasks, prompt_param)

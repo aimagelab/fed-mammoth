@@ -98,3 +98,4 @@ data
 slurm_out
 *.pyc
 output/
+config.json
