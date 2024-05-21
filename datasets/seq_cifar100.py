@@ -44,3 +44,12 @@ class SequentialCifar100(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+
+@register_dataset("joint-cifar100")
+class JointCifar100(SequentialCifar100):
+    N_CLASSES_PER_TASK = 100
+    N_TASKS = 1
+    TRAIN_TRANSFORM = transforms.ToTensor()
+    TEST_TRANSFORM = transforms.ToTensor()
+    INPUT_SHAPE = (32, 32, 3)
