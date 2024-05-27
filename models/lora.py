@@ -106,15 +106,17 @@ class Lora(BaseModel):
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
     def set_optimization(self):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
+        for key in self.optimization_dict.keys():
+            self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
         for key in self.lora_keys:
             self.old_B[key].requires_grad = False
             self.old_A[key].requires_grad = False
             self.cur_B[key].requires_grad = False
             self.cur_A[key].requires_grad = False
-            self.old_B[key] = self.old_B[key].to(self.device)
-            self.old_A[key] = self.old_A[key].to(self.device)
-            self.cur_B[key] = self.cur_B[key].to(self.device)
-            self.cur_A[key] = self.cur_A[key].to(self.device)
+            #self.old_B[key] = self.old_B[key].to(self.device)
+            #self.old_A[key] = self.old_A[key].to(self.device)
+            #self.cur_B[key] = self.cur_B[key].to(self.device)
+            #self.cur_A[key] = self.cur_A[key].to(self.device)
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             if "qkv" in key:
                 self.lora_ind[key] = self.lora_ind[key].to(self.device)
