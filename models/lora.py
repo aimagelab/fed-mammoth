@@ -111,6 +111,10 @@ class Lora(BaseModel):
             self.old_A[key].requires_grad = False
             self.cur_B[key].requires_grad = False
             self.cur_A[key].requires_grad = False
+            self.old_B[key].to(self.device)
+            self.old_A[key].to(self.device)
+            self.cur_B[key].to(self.device)
+            self.cur_A[key].to(self.device)
             if "qkv" in key:
                 if self.cur_task > 0:
                     self.optimization_dict[key] += merge_AB(self.old_A[key], self.old_B[key], self.lora_ind[key])

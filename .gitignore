@@ -4,6 +4,7 @@
 data/
 checkpoints/
 *.png
+*.jpg
 *.pt
 *.pkl
 *.sh
