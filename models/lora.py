@@ -115,10 +115,10 @@ class Lora(BaseModel):
             self.old_A[key].requires_grad = False
             self.cur_B[key].requires_grad = False
             self.cur_A[key].requires_grad = False
-            #self.old_B[key] = self.old_B[key].to(self.device)
-            #self.old_A[key] = self.old_A[key].to(self.device)
-            #self.cur_B[key] = self.cur_B[key].to(self.device)
-            #self.cur_A[key] = self.cur_A[key].to(self.device)
+            # self.old_B[key] = self.old_B[key].to(self.device)
+            # self.old_A[key] = self.old_A[key].to(self.device)
+            # self.cur_B[key] = self.cur_B[key].to(self.device)
+            # self.cur_A[key] = self.cur_A[key].to(self.device)
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             if "qkv" in key:
                 self.lora_ind[key] = self.lora_ind[key].to(self.device)
@@ -180,11 +180,11 @@ class Lora(BaseModel):
         super().begin_task(n_classes_per_task)
         if self.merging == "run_sum":
             for key in self.lora_keys:
-                self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach())
-                self.old_A[key] = (self.cur_task * self.old_A[key] + self.cur_A[key].detach())
+                self.old_B[key] = self.old_B[key] + self.cur_B[key].detach()
+                self.old_A[key] = self.old_A[key] + self.cur_A[key].detach()
                 self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
                 self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))    
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
         else:
             for key in self.lora_keys:
                 self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach()) / (self.cur_task + 1)
