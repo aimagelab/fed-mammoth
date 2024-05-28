@@ -52,12 +52,14 @@ class Lora(BaseModel):
         r: int = 16,
         enable_lora: list = [True, True, True],
         lora_head: str_to_bool = True,
+        merging: str = "run_sum",
     ) -> None:
         # for LoRA, we keep the mean of the LoRA modules of the old tasks
         super().__init__(fabric, network, device, optimizer, lr, wd_reg)
         self.lora_alpha = lora_alpha
         self.r = r
         self.enable_lora = enable_lora
+        self.merging = merging
         self.lora_keys = []
         self.lora_params = {}
         self.lora_ind = {}
@@ -176,12 +178,20 @@ class Lora(BaseModel):
 
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
-        for key in self.lora_keys:
-            self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach()) / (self.cur_task + 1)
-            self.old_A[key] = (self.cur_task * self.old_A[key] + self.cur_A[key].detach()) / (self.cur_task + 1)
-            self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
-            self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-            nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+        if self.merging == "run_sum":
+            for key in self.lora_keys:
+                self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach())
+                self.old_A[key] = (self.cur_task * self.old_A[key] + self.cur_A[key].detach())
+                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))    
+        else:
+            for key in self.lora_keys:
+                self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach()) / (self.cur_task + 1)
+                self.old_A[key] = (self.cur_task * self.old_A[key] + self.cur_A[key].detach()) / (self.cur_task + 1)
+                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
