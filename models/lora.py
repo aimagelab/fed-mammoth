@@ -68,8 +68,7 @@ class Lora(BaseModel):
         self.wd_reg = wd_reg
         self.lora_head = lora_head
         self.head_keys = []
-        self.old_B = {}
-        self.old_A = {}
+        self.old_delta = {}
         self.cur_B = {}
         self.cur_A = {}
         for name, param in network.named_parameters():
@@ -82,10 +81,11 @@ class Lora(BaseModel):
                 self.lora_ind[name][enable_lora, :] = True
                 self.lora_ind[name] = self.lora_ind[name].view(-1)
                 self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
-                self.old_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=False).to(self.device)
-                self.old_A[name] = nn.Parameter(torch.zeros(r * 3, param.shape[1]), requires_grad=False).to(self.device)
-                self.cur_B[name] = nn.Parameter(torch.zeros_like(self.old_B[name]), requires_grad=True).to(self.device)
-                self.cur_A[name] = nn.Parameter(torch.zeros_like(self.old_A[name]), requires_grad=True).to(self.device)
+                self.old_delta[name] = nn.Parameter(
+                    torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
+                ).to(self.device)
+                self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
+                self.cur_A[name] = nn.Parameter(torch.zeros(r * 3, param.shape[1]), requires_grad=True).to(self.device)
             elif (
                 ("mlp" in name and "weight" in name)
                 or ("proj" in name and "weight" in name and "attn" in name)
@@ -93,10 +93,11 @@ class Lora(BaseModel):
             ):
                 self.lora_keys.append(name)
                 self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
-                self.old_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=False).to(self.device)
-                self.old_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=False).to(self.device)
-                self.cur_B[name] = nn.Parameter(torch.zeros_like(self.old_B[name]), requires_grad=True).to(self.device)
-                self.cur_A[name] = nn.Parameter(torch.zeros_like(self.old_A[name]), requires_grad=True).to(self.device)
+                self.old_delta[name] = nn.Parameter(
+                    torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
+                ).to(self.device)
+                self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
+                self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
         self.optimization_dict = {}
         # self.network = network
         # self.set_optimization()
@@ -111,29 +112,19 @@ class Lora(BaseModel):
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
         for key in self.lora_keys:
-            self.old_B[key].requires_grad = False
-            self.old_A[key].requires_grad = False
+            self.old_delta[key].requires_grad = False
             self.cur_B[key].requires_grad = False
             self.cur_A[key].requires_grad = False
-            # self.old_B[key] = self.old_B[key].to(self.device)
-            # self.old_A[key] = self.old_A[key].to(self.device)
-            # self.cur_B[key] = self.cur_B[key].to(self.device)
-            # self.cur_A[key] = self.cur_A[key].to(self.device)
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             if "qkv" in key:
                 self.lora_ind[key] = self.lora_ind[key].to(self.device)
                 if self.cur_task > 0:
-                    self.optimization_dict[key] += merge_AB(self.old_A[key], self.old_B[key], self.lora_ind[key])
+                    self.optimization_dict[key] += self.old_delta[key]
                 self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
             else:
                 if self.cur_task > 0:
-                    self.optimization_dict[key] += self.old_B[key] @ self.old_A[key]
+                    self.optimization_dict[key] += self.old_delta[key]
                 self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
-        # OptimizerClass = getattr(torch.optim, self.optimizer_str)
-        ## self.optimizer = OptimizerClass(self.optimization_dict.values(), lr=self.lr, weight_decay=self.wd_reg)
-        # self.optimizer = OptimizerClass(
-        #    list(self.cur_B.values()) + list(self.cur_A.values()), lr=self.lr, weight_decay=self.wd_reg
-        # )
 
     def debug_matrices_create(self):
         for key in self.lora_keys:
@@ -159,17 +150,16 @@ class Lora(BaseModel):
             for key in self.head_keys:
                 optimization_dict[key].requires_grad = True
         for key in self.lora_keys:
-            self.old_B[key].requires_grad = False
-            self.old_A[key].requires_grad = False
+            self.old_delta[key].requires_grad = False
             self.cur_B[key].requires_grad = True
             self.cur_A[key].requires_grad = True
             if "qkv" in key:
                 if self.cur_task > 0:
-                    optimization_dict[key] += merge_AB(self.old_A[key], self.old_B[key], self.lora_ind[key])
+                    optimization_dict[key] += self.old_delta[key]
                 optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
             else:
                 if self.cur_task > 0:
-                    optimization_dict[key] += self.old_B[key] @ self.old_A[key]
+                    optimization_dict[key] += self.old_delta[key]
                 optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
         return optimization_dict
 
@@ -180,15 +170,26 @@ class Lora(BaseModel):
         super().begin_task(n_classes_per_task)
         if self.merging == "run_sum":
             for key in self.lora_keys:
-                self.old_B[key] = self.old_B[key] + self.cur_B[key].detach()
-                self.old_A[key] = self.old_A[key] + self.cur_A[key].detach()
+                if "qkv" in key:
+                    self.old_delta[key] += merge_AB(
+                        self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key]
+                    )
+                else:
+                    self.old_delta[key] += self.cur_B[key].detach() @ self.cur_A[key].detach()
                 self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
                 self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
                 nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
         else:
             for key in self.lora_keys:
-                self.old_B[key] = (self.cur_task * self.old_B[key] + self.cur_B[key].detach()) / (self.cur_task + 1)
-                self.old_A[key] = (self.cur_task * self.old_A[key] + self.cur_A[key].detach()) / (self.cur_task + 1)
+                if "qkv" in key:
+                    self.old_delta[key] = (
+                        self.old_delta[key] * self.cur_task
+                        + merge_AB(self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key])
+                    ) / (self.cur_task + 1)
+                else:
+                    self.old_delta[key] = (
+                        self.old_delta[key] * self.cur_task + self.cur_B[key].detach() @ self.cur_A[key].detach()
+                    ) / (self.cur_task + 1)
                 self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
                 self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
                 nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
@@ -196,22 +197,13 @@ class Lora(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
         self.cur_A = deepcopy(server_info["cur_A"])
-        self.old_A = deepcopy(server_info["old_A"])
-        self.old_B = deepcopy(server_info["old_B"])
+        self.old_delta = deepcopy(server_info["old_delta"])
         if not self.lora_head:
             self.network.model.head.load_state_dict(server_info["head"])
             for p in self.network.model.head.parameters():
                 p.requires_grad = True
 
-        # for p in self.network.parameters():
-        #    p.requires_grad = True
-        #
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
-        # self.optimizer = OptimizerClass(pow
-        #    list(self.network.parameters()),
-        #    lr=self.lr,
-        #    weight_decay=self.wd_reg,
-        # )
         if not self.lora_head:
             self.optimizer = OptimizerClass(
                 list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.network.model.head.parameters()),
@@ -260,8 +252,7 @@ class Lora(BaseModel):
         server_info = {
             "cur_A": deepcopy(self.cur_A),
             "cur_B": deepcopy(self.cur_B),
-            "old_A": deepcopy(self.old_A),
-            "old_B": deepcopy(self.old_B),
+            "old_delta": deepcopy(self.old_delta),
         }
         if not self.lora_head:
             server_info["head"] = deepcopy(self.network.model.head.state_dict())
