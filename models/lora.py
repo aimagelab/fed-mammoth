@@ -86,6 +86,7 @@ class Lora(BaseModel):
                 ).to(self.device)
                 self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
                 self.cur_A[name] = nn.Parameter(torch.zeros(r * 3, param.shape[1]), requires_grad=True).to(self.device)
+                nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
             elif (
                 ("mlp" in name and "weight" in name)
                 or ("proj" in name and "weight" in name and "attn" in name)
@@ -98,7 +99,13 @@ class Lora(BaseModel):
                 ).to(self.device)
                 self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
                 self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
+                nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
         self.optimization_dict = {}
+        self.old_tasks_A = None
+        self.old_tasks_B = None
+        if self.merging == "individual":
+            self.old_tasks_A = {}
+            self.old_tasks_B = {}
         # self.network = network
         # self.set_optimization()
         self.avg_type = avg_type
@@ -111,20 +118,38 @@ class Lora(BaseModel):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
-        for key in self.lora_keys:
-            self.old_delta[key].requires_grad = False
-            self.cur_B[key].requires_grad = False
-            self.cur_A[key].requires_grad = False
-            self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
-            if "qkv" in key:
-                self.lora_ind[key] = self.lora_ind[key].to(self.device)
-                if self.cur_task > 0:
-                    self.optimization_dict[key] += self.old_delta[key]
-                self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
-            else:
-                if self.cur_task > 0:
-                    self.optimization_dict[key] += self.old_delta[key]
-                self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+        if not "individual" in self.merging:
+            for key in self.lora_keys:
+                self.old_delta[key].requires_grad = False
+                self.cur_B[key].requires_grad = False
+                self.cur_A[key].requires_grad = False
+                self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                if "qkv" in key:
+                    self.lora_ind[key] = self.lora_ind[key].to(self.device)
+                    if self.cur_task > 0:
+                        self.optimization_dict[key] += self.old_delta[key]
+                    self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                else:
+                    if self.cur_task > 0:
+                        self.optimization_dict[key] += self.old_delta[key]
+                    self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+        else:
+            for key in self.lora_keys:
+                self.old_delta[key].requires_grad = False
+                self.cur_B[key].requires_grad = False
+                self.cur_A[key].requires_grad = False
+                self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                if "qkv" in key:
+                    self.lora_ind[key] = self.lora_ind[key].to(self.device)
+                    if self.cur_task > 0:
+                        self.optimization_dict[key] += (self.old_delta[key] * self.cur_task)
+                    self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                else:
+                    if self.cur_task > 0:
+                        self.optimization_dict[key] += (self.old_delta[key] * self.cur_task)
+                    self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+                self.optimization_dict[key] /= (self.cur_task + 1)
+        
 
     def debug_matrices_create(self):
         for key in self.lora_keys:
@@ -154,11 +179,11 @@ class Lora(BaseModel):
             self.cur_B[key].requires_grad = True
             self.cur_A[key].requires_grad = True
             if "qkv" in key:
-                if self.cur_task > 0:
+                if self.cur_task > 0 and not "individual" in self.merging:
                     optimization_dict[key] += self.old_delta[key]
                 optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
             else:
-                if self.cur_task > 0:
+                if self.cur_task > 0 and not "individual" in self.merging:
                     optimization_dict[key] += self.old_delta[key]
                 optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
         return optimization_dict
@@ -168,31 +193,35 @@ class Lora(BaseModel):
 
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
-        if self.merging == "run_sum":
-            for key in self.lora_keys:
-                if "qkv" in key:
-                    self.old_delta[key] += merge_AB(
-                        self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key]
-                    )
-                else:
-                    self.old_delta[key] += self.cur_B[key].detach() @ self.cur_A[key].detach()
-                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
-                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
-        else:
-            for key in self.lora_keys:
-                if "qkv" in key:
-                    self.old_delta[key] = (
-                        self.old_delta[key] * self.cur_task
-                        + merge_AB(self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key])
-                    ) / (self.cur_task + 1)
-                else:
-                    self.old_delta[key] = (
-                        self.old_delta[key] * self.cur_task + self.cur_B[key].detach() @ self.cur_A[key].detach()
-                    ) / (self.cur_task + 1)
-                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
-                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+        if self.cur_task > 0:
+            if self.merging == "run_sum":
+                for key in self.lora_keys:
+                    if "qkv" in key:
+                        self.old_delta[key] += merge_AB(
+                            self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key]
+                        )
+                    else:
+                        self.old_delta[key] += self.cur_B[key].detach() @ self.cur_A[key].detach()
+                    self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+                    self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+                    nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+            elif self.merging == "run_mean" or self.merging == "individual":
+                for key in self.lora_keys:
+                    if "qkv" in key:
+                        self.old_delta[key] = (
+                            self.old_delta[key] * (self.cur_task - 1)
+                            + merge_AB(self.cur_A[key].detach(), self.cur_B[key].detach(), self.lora_ind[key])
+                        ) / self.cur_task
+                    else:
+                        self.old_delta[key] = (
+                            self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
+                        ) / self.cur_task
+                    self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+                    self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+                    nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+            
+            else:
+                raise ValueError("Invalid merging type")
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
@@ -249,6 +278,10 @@ class Lora(BaseModel):
         return client_info
 
     def get_server_info(self):
+        for key in self.lora_keys:
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.cur_B[key] = self.cur_B[key].detach()
+            self.cur_A[key] = self.cur_A[key].detach()
         server_info = {
             "cur_A": deepcopy(self.cur_A),
             "cur_B": deepcopy(self.cur_B),
