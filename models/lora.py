@@ -118,7 +118,7 @@ class Lora(BaseModel):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
-        if not "individual" in self.merging:
+        if "run_sum" in self.merging:
             for key in self.lora_keys:
                 self.old_delta[key].requires_grad = False
                 self.cur_B[key].requires_grad = False
@@ -142,13 +142,16 @@ class Lora(BaseModel):
                 if "qkv" in key:
                     self.lora_ind[key] = self.lora_ind[key].to(self.device)
                     if self.cur_task > 0:
-                        self.optimization_dict[key] += (self.old_delta[key] * self.cur_task)
-                    self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                        tmp = (self.old_delta[key] * self.cur_task) + merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                        self.optimization_dict[key] += tmp / (self.cur_task + 1)
+                    else:
+                        self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
                 else:
                     if self.cur_task > 0:
-                        self.optimization_dict[key] += (self.old_delta[key] * self.cur_task)
-                    self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
-                self.optimization_dict[key] /= (self.cur_task + 1)
+                        tmp = (self.old_delta[key] * self.cur_task) + self.cur_B[key] @ self.cur_A[key]
+                        self.optimization_dict[key] += tmp / (self.cur_task + 1)
+                    else:
+                        self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
         
 
     def debug_matrices_create(self):
