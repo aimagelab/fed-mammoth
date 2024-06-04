@@ -133,7 +133,7 @@ class Lora(BaseModel):
                     if self.cur_task > 0:
                         self.optimization_dict[key] += self.old_delta[key]
                     self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
-        else:
+        elif "run_mean" in self.merging:
             for key in self.lora_keys:
                 self.old_delta[key].requires_grad = False
                 self.cur_B[key].requires_grad = False
@@ -152,6 +152,28 @@ class Lora(BaseModel):
                         self.optimization_dict[key] += tmp / (self.cur_task + 1)
                     else:
                         self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+        elif "individual" in self.merging:
+            for key in self.lora_keys:
+                self.old_delta[key].requires_grad = False
+                self.cur_B[key].requires_grad = False
+                self.cur_A[key].requires_grad = False
+                self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                if "qkv" in key:
+                    self.lora_ind[key] = self.lora_ind[key].to(self.device)
+                    if self.cur_task > 0:
+                        tmp = (self.old_delta[key] * self.cur_task) + merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                        self.optimization_dict[key] += tmp
+                    else:
+                        self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                else:
+                    if self.cur_task > 0:
+                        tmp = (self.old_delta[key] * self.cur_task) + self.cur_B[key] @ self.cur_A[key]
+                        self.optimization_dict[key] += tmp
+                    else:
+                        self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+        else:
+            raise ValueError("Invalid merging type")
+
         
 
     def debug_matrices_create(self):
