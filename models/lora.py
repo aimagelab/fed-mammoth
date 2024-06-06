@@ -101,6 +101,10 @@ class Lora(BaseModel):
                 self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
                 nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
         self.optimization_dict = {}
+        if not self.lora_head:
+            self.head = {key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device) for key in self.head_keys}
+            #for key in self.head_keys:
+            #    self.head[key] = nn.Parameter(torch.zeros_like(network.model.head.state_dict()[key]), requires_grad=True).to(self.device)      
         self.old_tasks_A = None
         self.old_tasks_B = None
         if self.cl_merge == "individual":
@@ -111,6 +115,7 @@ class Lora(BaseModel):
         self.avg_type = avg_type
         self.pre_B = {}
         self.pre_A = {}
+        self.pre_head = None
         self.pre_network = None
 
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
@@ -202,6 +207,7 @@ class Lora(BaseModel):
         for key in self.lora_keys:
             self.pre_B[key] = self.cur_B[key].detach().clone()
             self.pre_A[key] = self.cur_A[key].detach().clone()
+        self.pre_head = deepcopy(self.network.model.head.state_dict())
 
     def debug_matrices_compare(self):
         num_equal_B = 0
@@ -215,12 +221,22 @@ class Lora(BaseModel):
                 print(f"A equal with key {key}")
         print(f"Number of equal B matrices: {num_equal_B} out of {len(self.lora_keys)}")
         print(f"Number of equal A matrices: {num_equal_A} out of {len(self.lora_keys)}")
+        if not self.lora_head:
+            num_equal_head = 0
+            for key in self.pre_head.keys():
+                if torch.allclose(self.pre_head[key], self.network.model.head.state_dict()[key]):
+                    num_equal_head += 1
+                    print(f"Head equal with key {key}")
+                else:
+                    print(f"Head not equal with key {key}, distance: {torch.dist(self.pre_head[key], self.network.model.head.state_dict()[key])}")
+            print(f"Number of equal head matrices: {num_equal_head} out of {len(self.head_keys)}")
 
     def get_optimization_dict(self):
         optimization_dict = deepcopy(dict(self.network.state_dict()))
         if not self.lora_head:
             for key in self.head_keys:
-                optimization_dict[key].requires_grad = True
+                self.head[key].requires_grad = True
+                optimization_dict[key] = self.head[key]
         for key in self.lora_keys:
             self.old_delta[key].requires_grad = False
             self.cur_B[key].requires_grad = True
@@ -276,13 +292,20 @@ class Lora(BaseModel):
         self.old_delta = deepcopy(server_info["old_delta"])
         if not self.lora_head:
             self.network.model.head.load_state_dict(server_info["head"])
-            for p in self.network.model.head.parameters():
-                p.requires_grad = True
+            #for p in self.network.model.head.parameters():
+            #    p.requires_grad = True
+            self.head = {key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device) for key in self.head_keys}
 
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
+        #if not self.lora_head:
+        #    self.optimizer = OptimizerClass(
+        #        list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.network.model.head.parameters()),
+        #        lr=self.lr,
+        #        weight_decay=self.wd_reg,
+        #    )
         if not self.lora_head:
             self.optimizer = OptimizerClass(
-                list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.network.model.head.parameters()),
+                list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values()),
                 lr=self.lr,
                 weight_decay=self.wd_reg,
             )
@@ -297,6 +320,8 @@ class Lora(BaseModel):
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
+        # self.debug_matrices_create()
+        # self.debug_matrices_compare()
         optimization_dict = self.get_optimization_dict()
         # optimization_dict = self.get_dummy_optimization_dict()
         with self.fabric.autocast():
@@ -337,6 +362,11 @@ class Lora(BaseModel):
         if not self.lora_head:
             server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info
+
+    def end_round_client(self, dataloader: DataLoader):
+        if not self.lora_head:
+            self.network.model.head.load_state_dict(self.head, strict=False)
+        return super().end_round_client(dataloader)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
