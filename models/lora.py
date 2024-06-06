@@ -365,7 +365,10 @@ class Lora(BaseModel):
 
     def end_round_client(self, dataloader: DataLoader):
         if not self.lora_head:
-            self.network.model.head.load_state_dict(self.head, strict=False)
+            sd = self.network.state_dict()
+            for key in self.head_keys:
+                sd[key] = self.head[key]
+            self.network.load_state_dict(sd)
         return super().end_round_client(dataloader)
 
     def end_round_server(self, client_info: List[dict]):
