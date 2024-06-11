@@ -294,7 +294,7 @@ class Lora(BaseModel):
             self.network.model.head.load_state_dict(server_info["head"])
             #for p in self.network.model.head.parameters():
             #    p.requires_grad = True
-            self.head = {key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device) for key in self.head_keys}
+            self.head = {key: nn.Parameter(self.network.state_dict()[key].clone().detach(), requires_grad=True).to(self.device) for key in self.head_keys}
 
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         #if not self.lora_head:
