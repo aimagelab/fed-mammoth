@@ -13,18 +13,23 @@ from utils.tools import get_time_str
 
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     correct, total = 0, 0
+    task_accuracies = []
     with torch.no_grad():
         for t in range(task + 1):
+            task_correct, task_total = 0, 0
             test_loaders = dataset.get_cur_dataloaders(t)[1]
             for test_loader in test_loaders:
                 test_loader = fabric.setup_dataloaders(test_loader)
                 for inputs, labels in test_loader:
                     outputs = model(inputs)
                     pred = torch.max(outputs, dim=1)[1]
+                    task_correct += (pred == labels).sum().item()
+                    task_total += labels.shape[0]
                     correct += (pred == labels).sum().item()
                     total += labels.shape[0]
+            task_accuracies.append(round(task_correct / task_total * 100, 2))
 
-    print(f"Mean accuracy up to task {task + 1}:", round(correct / total * 100, 2), "%")
+    print(f"Mean accuracy up to task {task + 1}:", round(correct / total * 100, 2), "%", "Task accuracies:", task_accuracies)
     return round(correct / total * 100, 2)
 
 

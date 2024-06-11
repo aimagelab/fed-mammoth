@@ -10,7 +10,7 @@ from torch.func import functional_call
 from copy import deepcopy
 from utils.tools import str_to_bool
 
-from models.lora import Lora
+from models.lora import Lora, merge_AB, zero_pad
 
 @register_model("lora_regmean")
 class LoraRegMean(Lora):
@@ -50,25 +50,30 @@ class LoraRegMean(Lora):
             if name in self.lora_modules:
                 #module.forward_handle = module.register_forward_hook(self.hook_forward)
                 hooks[name] = module.register_forward_hook(self.hook_handler(name))
-        for x, y in dataloader:
-            x, y = x.to(self.device), y.to(self.device)
-            #TODO handle the fact that the network is not updated
-            self.network(x)
+        self.set_optimization()
+        with torch.no_grad():
+            for x, y in dataloader:
+                x, y = x.to(self.device), y.to(self.device)
+                #TODO handle the fact that the network is not updated
+                self.forward(x)
+        self.optimization_dict = None
         for name, module in self.network.named_modules():
             if name in self.lora_modules:
                 #hooks[name].remove()
-                tmp = self.features[name].to(self.device)
-                self.gram[name] = (tmp.T @ tmp).to("cpu")
+                self.gram[name] = self.features[name].float().to(self.device)
                 self.features[name] = torch.tensor([], dtype=torch.float32)
                 hooks[name].remove()
         print("End of round")
 
     def hook_handler(self, name):
         def hook_forward(module, inputs, _):
-            x = inputs[0].detach()
+            x = inputs[0].detach().double()
             if len(x.shape) == 3:
                 x = x.view(-1, x.size(-1))
-            self.features[name] = torch.cat([self.features[name], x.cpu()])
+            if len(self.features[name]) == 0:
+                self.features[name] = (x.T @ x)
+            else:
+                self.features[name] += (x.T @ x)
         return hook_forward
     
     def get_client_info(self, dataloader: DataLoader):
@@ -97,8 +102,12 @@ class LoraRegMean(Lora):
 
         #regmean solution
         w_solution = {name : None for name in self.lora_modules}
+        #merge_AB(self.cur_B[key], self.cur_A[key], self.lora_ind[key])
         for name, key in zip(self.lora_modules, self.lora_keys):
-            w_solution[name] = torch.cat([client_B[key] @ client_A[key] @ client["grams"][name] for client, client_B, client_A in zip(client_info, cl_B, cl_A)]).sum(0) / torch.cat([client["grams"][name] for client in client_info]).sum(0)
+            if "qkv" in key:
+                w_solution[name] = torch.stack([merge_AB(client_A[key], client_B[key], self.lora_ind[key]) @ client["grams"][name] for client_A, client_B, client in zip(cl_A, cl_B, client_info)]).sum(0) @ torch.inverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
+            else:
+                w_solution[name] = torch.stack([client_B[key] @ client_A[key] @ client["grams"][name] for client_A, client_B, client in zip(cl_A, cl_B, client_info)]).sum(0) @ torch.inverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
             #self.features[name] = torch.stack([client["grams"][name] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
         
         if len(client_info) > 0:
