@@ -117,7 +117,7 @@ class Lora(BaseModel):
         self.pre_A = {}
         self.pre_head = None
         self.pre_network = None
-        self.network.eval()
+        #self.network.eval()
 
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
     def set_optimization(self):

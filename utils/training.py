@@ -14,6 +14,8 @@ from utils.tools import get_time_str
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     correct, total = 0, 0
     task_accuracies = []
+    training_status = model.training
+    model.eval()
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
@@ -29,6 +31,7 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
                     total += labels.shape[0]
             task_accuracies.append(round(task_correct / task_total * 100, 2))
 
+    model.train(training_status)
     print(f"Mean accuracy up to task {task + 1}:", round(correct / total * 100, 2), "%", "Task accuracies:", task_accuracies)
     return round(correct / total * 100, 2)
 
