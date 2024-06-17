@@ -117,6 +117,7 @@ class Lora(BaseModel):
         self.pre_A = {}
         self.pre_head = None
         self.pre_network = None
+        self.network.eval()
 
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
     def set_optimization(self):
@@ -187,16 +188,16 @@ class Lora(BaseModel):
                     if "qkv" in key:
                         self.lora_ind[key] = self.lora_ind[key].to(self.device)
                         if self.cur_task > 0:
-                            tmp = (self.old_delta[key] * self.cur_task) + merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                            tmp = (self.old_delta[key] * self.cur_task) + merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key]).detach()
                             self.optimization_dict[key] += (tmp / (self.cur_task + 1))
                         else:
-                            self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key])
+                            self.optimization_dict[key] += merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key]).detach()
                     else:
                         if self.cur_task > 0:
-                            tmp = (self.old_delta[key] * self.cur_task) + self.cur_B[key] @ self.cur_A[key]
+                            tmp = (self.old_delta[key] * self.cur_task) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                             self.optimization_dict[key] += (tmp / (self.cur_task + 1))
                         else:
-                            self.optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
+                            self.optimization_dict[key] += self.cur_B[key].detach() @ self.cur_A[key].detach()
              
         else:
             raise ValueError("Invalid cl_merge type")
