@@ -46,6 +46,24 @@ class SequentialCifar100(BaseDataset):
             getattr(self, f"{split}_dataset").targets = None
 
 
+@register_dataset("seq-cifar100_224")
+class SequentialCifar100_224(SequentialCifar100):
+    MEAN_NORM = (0.5, 0.5, 0.5)
+    STD_NORM = (0.5, 0.5, 0.5)
+    normalize = transforms.Normalize(MEAN_NORM, STD_NORM)
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(size=(224, 224), interpolation=3),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [transforms.Resize(256, interpolation=3), transforms.CenterCrop(224), transforms.ToTensor(), normalize]
+    )
+    INPUT_SHAPE = (224, 224, 3)
+
 @register_dataset("joint-cifar100")
 class JointCifar100(SequentialCifar100):
     N_CLASSES_PER_TASK = 100
