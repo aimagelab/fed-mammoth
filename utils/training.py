@@ -112,6 +112,7 @@ def train(
                 model.end_round_client(train_loader)
                 model.to("cpu")
                 clients_info.append(model.get_client_info(train_loader))
+                torch.cuda.empty_cache()
                 if len(train_loader):
                     print()
 
