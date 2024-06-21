@@ -90,7 +90,6 @@ class RegMean(BaseModel):
                 #    break
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
-                # hooks[name].remove()
                 self.features[name] = self.features[name].to("cpu")
                 shape = self.features[name].shape[-1]
                 self.gram[name] = (
