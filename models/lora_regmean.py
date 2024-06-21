@@ -81,8 +81,6 @@ class LoraRegMean(Lora):
             for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
                 x, y = x.to(self.device), y.to(self.device)
                 self.forward(x)
-                if id > 2:
-                    break
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
                 self.features[name] = self.features[name].to("cpu")
