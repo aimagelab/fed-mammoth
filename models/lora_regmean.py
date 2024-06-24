@@ -150,7 +150,8 @@ class LoraRegMean(Lora):
                         @ torch.inverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
                     ).to(torch.float32)
             lora_opt = torch.optim.SGD(list(self.cur_B.values()) + list(self.cur_A.values()), lr=1e-3, weight_decay=0)
-            num_epochs = 100
+            num_epochs = 1000
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(lora_opt, num_epochs, eta_min=1e-6)
             criterion = torch.nn.MSELoss()
             losses = []
             for key in self.lora_keys:
@@ -168,6 +169,7 @@ class LoraRegMean(Lora):
                     loss = criterion(res, w_solution[key])
                     loss.backward()
                     lora_opt.step()
+                    scheduler.step()
                 losses.append(loss.detach())
             print(f"Reconstruction loss: {sum(losses) / len(losses)}")
             del lora_opt, criterion, losses, w_solution
