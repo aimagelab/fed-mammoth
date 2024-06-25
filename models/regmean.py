@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 @register_model("regmean")
 class RegMean(BaseModel):
+
     def __init__(
         self,
         fabric,
@@ -28,8 +29,21 @@ class RegMean(BaseModel):
         regmean_all: str_to_bool = True,
         alpha_regmean: float = 0.5,
         gram_dtype: str = "32",
+        slca: str_to_bool = False,
     ) -> None:
-        super(RegMean, self).__init__(fabric, network, device, optimizer, lr, wd_reg)
+        if slca:
+            backbone_params = []
+            head_params = []
+            for n, p in network.named_parameters():
+                if "head" in n:
+                    head_params.append(p)
+                else:
+                    backbone_params.append(p)
+            params = [{"params": backbone_params, "lr": lr / 100}, {"params": head_params}]
+            super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
+        else:
+            super(RegMean, self).__init__(fabric, network, device, optimizer, lr, wd_reg)
+        self.slca = slca
         self.avg_type = avg_type
         self.regmean_all = regmean_all
         self.alpha_regmean = alpha_regmean
