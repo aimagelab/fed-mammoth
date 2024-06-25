@@ -23,7 +23,7 @@ class RegMean(BaseModel):
         network: Vit,
         device: str,
         optimizer: str = "AdamW",
-        lr: float = 3e-4,
+        lr: float = 1e-5,
         wd_reg: float = 0.1,
         avg_type: str = "weighted",
         regmean_all: str_to_bool = True,
@@ -83,9 +83,13 @@ class RegMean(BaseModel):
 
         if update:
             self.fabric.backward(loss)
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
 
         return loss.item()
+
+    def begin_round_client(self, dataloader: DataLoader, server_info: dict):
+        self.network.set_params(server_info["params"])
 
     def end_round_client(self, dataloader: DataLoader):
         super().end_round_client(dataloader)

@@ -64,6 +64,25 @@ class SequentialCifar100_224(SequentialCifar100):
     )
     INPUT_SHAPE = (224, 224, 3)
 
+
+@register_dataset("seq-cifar100_224_regmean")
+class SequentialCifar100_regmean(SequentialCifar100_224):
+    MEAN_NORM = [0.5071, 0.4865, 0.4409]
+    STD_NORM = [0.2673, 0.2564, 0.2762]
+    normalize = transforms.Normalize(MEAN_NORM, STD_NORM)
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.ToPILImage(),
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.Resize(224, interpolation=3),
+            transforms.ToTensor(),
+            transforms.Normalize(MEAN_NORM, STD_NORM),
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose([transforms.Resize(224, interpolation=3), transforms.ToTensor(), normalize])
+
+
 @register_dataset("joint-cifar100")
 class JointCifar100(SequentialCifar100):
     N_CLASSES_PER_TASK = 100
