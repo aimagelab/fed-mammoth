@@ -89,7 +89,8 @@ class RegMean(BaseModel):
         return loss.item()
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
-        self.network.set_params(server_info["params"])
+        sd = server_info["state_dict"]
+        self.network.load_state_dict(sd)
 
     def end_round_client(self, dataloader: DataLoader):
         super().end_round_client(dataloader)
@@ -145,6 +146,9 @@ class RegMean(BaseModel):
         for name in self.gram_modules:
             self.gram[name] = self.gram[name].to(device)
             self.features[name] = self.features[name].to(device)
+
+    def get_server_info(self):
+        return {"state_dict": deepcopy(self.network.state_dict())}
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
