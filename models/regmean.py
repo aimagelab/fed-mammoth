@@ -172,7 +172,7 @@ class RegMean(BaseModel):
                             for client in client_info
                         ]
                     ).sum(0)
-                    @ torch.inverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
+                    @ torch.pinverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
                 ).to(torch.float32)
             else:
                 sd[key] = torch.stack(
