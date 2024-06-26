@@ -427,3 +427,13 @@ class Lora(BaseModel):
                 )
 
         self.set_optimization()
+
+    def to(self, device="cpu"):
+        self.network.to(device)
+        for key in self.lora_keys:
+            self.cur_B[key] = self.cur_B[key].to(device)
+            self.cur_A[key] = self.cur_A[key].to(device)
+            self.old_delta[key] = self.old_delta[key].to(device)
+        if not self.lora_head:
+            for key in self.head_keys:
+                self.head[key] = self.head[key].to(device)
