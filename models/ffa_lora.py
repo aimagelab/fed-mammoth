@@ -12,6 +12,7 @@ from utils.tools import str_to_bool
 
 from models.lora import Lora
 
+
 @register_model("ffa_lora")
 class FfaLora(Lora):
     def __init__(
@@ -25,12 +26,18 @@ class FfaLora(Lora):
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 16,
-        enable_lora: list = [True, True, True],
         lora_head: str_to_bool = True,
         cl_merge: str = "run_sum",
         ffa: str_to_bool = True,
     ) -> None:
-        super(FfaLora, self).__init__(fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, enable_lora, lora_head, cl_merge)
+        super(FfaLora, self).__init__(
+            fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
+        )
+        for key in self.lora_keys:
+            self.cur_A[key].requires_grad = False
+
+    def begin_task(self, n_classes_per_task: int):
+        super().begin_task(n_classes_per_task)
         for key in self.lora_keys:
             self.cur_A[key].requires_grad = False
 
@@ -40,17 +47,14 @@ class FfaLora(Lora):
         self.old_delta = deepcopy(server_info["old_delta"])
         if not self.lora_head:
             self.network.model.head.load_state_dict(server_info["head"])
-            #for p in self.network.model.head.parameters():
+            # for p in self.network.model.head.parameters():
             #    p.requires_grad = True
-            self.head = {key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device) for key in self.head_keys}
+            self.head = {
+                key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device)
+                for key in self.head_keys
+            }
 
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
-        #if not self.lora_head:
-        #    self.optimizer = OptimizerClass(
-        #        list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.network.model.head.parameters()),
-        #        lr=self.lr,
-        #        weight_decay=self.wd_reg,
-        #    )
         if not self.lora_head:
             self.optimizer = OptimizerClass(
                 list(self.cur_B.values()) + list(self.head.values()),
@@ -58,7 +62,5 @@ class FfaLora(Lora):
                 weight_decay=self.wd_reg,
             )
         else:
-            self.optimizer = OptimizerClass(
-                list(self.cur_B.values()), lr=self.lr, weight_decay=self.wd_reg
-            )
+            self.optimizer = OptimizerClass(list(self.cur_B.values()), lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)

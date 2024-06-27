@@ -76,19 +76,6 @@ class LoraRegMean(Lora):
                 self.fed_weights[key] = torch.zeros_like(merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key]))
             else:
                 self.fed_weights[key] = torch.zeros_like((self.cur_B[key] @ self.cur_A[key]))
-        # for name, param in network.named_parameters():
-        #    if "qkv" in name and "weight" in name:
-        #        self.fed_weights[name] = nn.Parameter(
-        #            torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
-        #        ).to(self.device)
-        #    elif (
-        #        ("mlp" in name and "weight" in name)
-        #        or ("proj" in name and "weight" in name and "attn" in name)
-        #        or (self.lora_head and "head" in name and "weight" in name)
-        #    ):
-        #        self.fed_weights[name] = nn.Parameter(
-        #            torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
-        #        ).to(self.device)
 
     def get_optimization_dict(self):
         opti_dict = super().get_optimization_dict()
