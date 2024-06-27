@@ -29,7 +29,6 @@ class LoraRegMean(Lora):
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 16,
-        enable_lora: list = [True, True, True],
         lora_head: str_to_bool = False,
         cl_merge: str = "individual_mean",
         regmean_all: str_to_bool = True,
@@ -38,7 +37,7 @@ class LoraRegMean(Lora):
         reg_dtype_64: str_to_bool = True,
     ) -> None:
         super(LoraRegMean, self).__init__(
-            fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, enable_lora, lora_head, cl_merge
+            fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
         )
         self.reg_dtype_64 = reg_dtype_64
         self.lora_head = False
@@ -55,8 +54,6 @@ class LoraRegMean(Lora):
         )
         # layers to be used for regmean: if regmean_all is True, all layers are used, otherwise only the head
         for name, module in self.network.named_modules():
-            # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
-            # list(module.parameters())
             if (
                 (
                     (("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
@@ -72,10 +69,7 @@ class LoraRegMean(Lora):
         self.gram = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
         self.fed_weights = {}
         for key in self.lora_keys:
-            if "qkv" in key:
-                self.fed_weights[key] = torch.zeros_like(merge_AB(self.cur_A[key], self.cur_B[key], self.lora_ind[key]))
-            else:
-                self.fed_weights[key] = torch.zeros_like((self.cur_B[key] @ self.cur_A[key]))
+            self.fed_weights[key] = torch.zeros_like((self.cur_B[key] @ self.cur_A[key]))
 
     def get_optimization_dict(self):
         opti_dict = super().get_optimization_dict()
@@ -269,32 +263,15 @@ class LoraRegMean(Lora):
                 if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                     name = self.middle_names[key]
                     self.fed_weights[key] = self.fed_weights[key].to("cpu")
-                    if "qkv" in key:
-                        self.fed_weights[key] += (
-                            torch.stack(
-                                [
-                                    merge_AB(client_A[key], client_B[key], self.lora_ind[key]).to(dtype)
-                                    @ client["grams"][name].to(dtype)
-                                    for client, client_A, client_B in zip(client_info, cl_A, cl_B)
-                                ]
-                            ).sum(0)
-                            @ torch.inverse(
-                                torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
-                            )
-                        ).to(torch.float32)
-                    else:
-                        self.fed_weights[key] += (
-                            torch.stack(
-                                [
-                                    (client_B[key] @ client_A[key]).to(dtype) @ client["grams"][name].to(dtype)
-                                    for client, client_A, client_B in zip(client_info, cl_A, cl_B)
-                                ]
-                            ).sum(0)
-                            @ torch.inverse(
-                                torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
-                            )
-                        ).to(torch.float32)
-
+                    self.fed_weights[key] += (
+                        torch.stack(
+                            [
+                                (client_B[key] @ client_A[key]).to(dtype) @ client["grams"][name].to(dtype)
+                                for client, client_A, client_B in zip(client_info, cl_A, cl_B)
+                            ]
+                        ).sum(0)
+                        @ torch.inverse(torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0))
+                    ).to(torch.float32)
         # regmean on head
         keys = list(self.network.state_dict().keys())
         sd = self.network.state_dict()

@@ -10,12 +10,6 @@ from torch.func import functional_call
 from copy import deepcopy
 from utils.tools import str_to_bool
 
-
-#  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
 import math
 from typing import Optional, List
 
@@ -50,8 +44,8 @@ class Lora(BaseModel):
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 16,
-        lora_head: str_to_bool = True,
-        cl_merge: str = "run_sum",
+        lora_head: str_to_bool = False,
+        cl_merge: str = "individual_mean",
     ) -> None:
         # for LoRA, we keep the mean of the LoRA modules of the old tasks
         super().__init__(fabric, network, device, optimizer, lr, wd_reg)
