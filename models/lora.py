@@ -195,28 +195,17 @@ class Lora(BaseModel):
             if self.cl_merge == "run_sum":
                 for key in self.lora_keys:
                     self.old_delta[key] += self.cur_B[key].detach() @ self.cur_A[key].detach()
-                    self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(
-                        self.device
-                    )
-                    self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(
-                        self.device
-                    )
-                    nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
             elif self.cl_merge == "run_mean" or "individual" in self.cl_merge:
                 for key in self.lora_keys:
                     self.old_delta[key] = (
                         self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                     ) / self.cur_task
-                    self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(
-                        self.device
-                    )
-                    self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(
-                        self.device
-                    )
-                    nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
-
             else:
                 raise ValueError("Invalid cl_merge type")
+            for key in self.lora_keys:
+                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
