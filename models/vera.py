@@ -58,7 +58,7 @@ class Vera(Lora):
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
         r: int = 1024,
-        lora_head: str_to_bool = True,
+        lora_head: str_to_bool = False,
         cl_merge: str = "individual_mean",
         d_initial: float = 0.1,
     ):
@@ -68,23 +68,57 @@ class Vera(Lora):
         self.d_initial = d_initial
         self.vec_b = {}
         self.vec_d = {}
+        self.pre_b = {}
+        self.pre_d = {}
         for key in self.lora_keys:
             d = self.cur_B[key].shape[0]
+            generator = torch.Generator().manual_seed(0)
+            self.cur_B[key] = _kaiming_init(
+                (self.cur_B[key].shape[0], self.cur_B[key].shape[1]), generator=generator
+            ).to(self.device)
+            self.cur_A[key] = _kaiming_init(
+                (self.cur_A[key].shape[0], self.cur_A[key].shape[1]), generator=generator
+            ).to(self.device)
             self.vec_b[key] = nn.Parameter(torch.zeros(d), requires_grad=True).to(self.device)
-            self.vec_d[key] = nn.Parameter(torch.zeros(r), requires_grad=True).to(self.device)
+            self.vec_d[key] = nn.Parameter(torch.ones(r) * self.d_initial, requires_grad=True).to(self.device)
+
+    def debug_matrices_create(self):
+        for key in self.lora_keys:
+            self.pre_b[key] = self.vec_b[key].detach().clone()
+            self.pre_d[key] = self.vec_d[key].detach().clone()
+        self.pre_head = deepcopy(self.head.state_dict())
+
+    def debug_matrices_compare(self):
+        num_equal_b = 0
+        num_equal_d = 0
+        for key in self.lora_keys:
+            if torch.allclose(self.pre_b[key], self.vec_b[key]):
+                num_equal_b += 1
+                print(f"b equal with key {key}")
+            if torch.allclose(self.pre_d[key], self.vec_d[key]):
+                num_equal_d += 1
+                print(f"d equal with key {key}")
+        print(f"Number of equal b vectors: {num_equal_b} out of {len(self.lora_keys)}")
+        print(f"Number of equal d vectors: {num_equal_d} out of {len(self.lora_keys)}")
+        if not self.lora_head:
+            num_equal_head = 0
+            for key in self.pre_head.keys():
+                if torch.allclose(self.pre_head[key], self.head.state_dict()[key]):
+                    num_equal_head += 1
+                    print(f"Head equal with key {key}")
+                else:
+                    print(
+                        f"Head not equal with key {key}, distance: {torch.dist(self.pre_head[key], self.network.model.head.state_dict()[key])}"
+                    )
+            print(f"Number of equal head matrices: {num_equal_head} out of {len(self.head_keys)}")
 
     def get_optimization_dict(self):
         optimization_dict = deepcopy(dict(self.network.state_dict()))
         if not self.lora_head:
             for key in self.head_keys:
-                self.head[key].requires_grad = True
+                # self.head[key].requires_grad = True
                 optimization_dict[key] = self.head[key]
         for key in self.lora_keys:
-            self.old_delta[key].requires_grad = False
-            self.cur_B[key].requires_grad = False
-            self.cur_A[key].requires_grad = False
-            self.vec_b[key].requires_grad = True
-            self.vec_d[key].requires_grad = True
             if self.cur_task > 0 and not "individual" in self.cl_merge:
                 optimization_dict[key] += self.old_delta[key]
             optimization_dict[key] += (
@@ -101,59 +135,28 @@ class Vera(Lora):
         self.cpt = n_classes_per_task
         self.cur_offset = self.cur_task * self.cpt
         # adjust grads nd move to device
-        for key in self.lora_keys:
-            self.old_delta[key] = self.old_delta[key].detach()
-            self.cur_B[key] = self.cur_B[key].detach()
-            self.cur_A[key] = self.cur_A[key].detach()
-            self.vec_b[key] = self.vec_b[key].detach()
-            self.vec_d[key] = self.vec_d[key].detach()
-            self.old_delta[key] = self.old_delta[key].to(self.device)
-            self.cur_A[key] = self.cur_A[key].to(self.device)
-            self.cur_B[key] = self.cur_B[key].to(self.device)
-            self.vec_b[key] = self.vec_b[key].to(self.device)
-            self.vec_d[key] = self.vec_d[key].to(self.device)
-
+        self.detach()
+        self.to(self.device)
         # vera begin task
         if self.cur_task > 0:
             if self.cl_merge == "run_sum":
                 for key in self.lora_keys:
-
+                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     self.old_delta[key] += (
-                        (
-                            self.vec_b[key].detach()
-                            * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                        )
-                        @ self.cur_B[key].detach()
-                        @ (
-                            self.vec_d[key].detach()
-                            * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                        )
-                        @ self.cur_A[key].detach()
+                        (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                     )
             elif self.cl_merge == "run_mean" or "individual" in self.cl_merge:
                 for key in self.lora_keys:
+                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     self.old_delta[key] = (
                         self.old_delta[key] * (self.cur_task - 1)
-                        + (
-                            (
-                                self.vec_b[key].detach()
-                                * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_B[key].detach()
-                            @ (
-                                self.vec_d[key].detach()
-                                * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_A[key].detach()
-                        )
+                        + ((self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key])
                     ) / self.cur_task
             else:
                 raise ValueError("Invalid cl_merge type")
             for key in self.lora_keys:
-                # TODO: create A and B matrices properly
-                # self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=False).to(self.device)
-                # self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=False).to(self.device)
-                # nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
                 generator = torch.Generator().manual_seed(0)
                 self.cur_B[key] = _kaiming_init(
                     (self.cur_B[key].shape[0], self.cur_B[key].shape[1]), generator=generator
@@ -172,10 +175,12 @@ class Vera(Lora):
         self.vec_b = deepcopy(server_info["vec_b"])
         self.vec_d = deepcopy(server_info["vec_d"])
         self.old_delta = deepcopy(server_info["old_delta"])
+        self.detach(only_lora=True)
+        for key in self.lora_keys:
+            self.vec_b[key].requires_grad = True
+            self.vec_d[key].requires_grad = True
         if not self.lora_head:
             self.network.model.head.load_state_dict(server_info["head"])
-            # for p in self.network.model.head.parameters():
-            #    p.requires_grad = True
             self.head = {
                 key: nn.Parameter(self.network.state_dict()[key].clone().detach(), requires_grad=True).to(self.device)
                 for key in self.head_keys
@@ -209,11 +214,8 @@ class Vera(Lora):
         return client_info
 
     def get_server_info(self):
-
+        self.detach()
         server_info = super().get_server_info()
-        for key in self.lora_keys:
-            self.vec_b[key] = self.vec_b[key].detach()
-            self.vec_d[key] = self.vec_d[key].detach()
         server_info["vec_b"] = deepcopy(self.vec_b)
         server_info["vec_d"] = deepcopy(self.vec_d)
         return server_info
@@ -251,103 +253,57 @@ class Vera(Lora):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
-        for key in self.lora_keys:
-            self.old_delta[key] = self.old_delta[key].detach()
-            self.cur_B[key] = self.cur_B[key].detach()
-            self.cur_A[key] = self.cur_A[key].detach()
-            self.vec_b[key] = self.vec_b[key].detach()
-            self.vec_d[key] = self.vec_d[key].detach()
-            self.old_delta[key] = self.old_delta[key].to(self.device)
-            self.cur_A[key] = self.cur_A[key].to(self.device)
-            self.cur_B[key] = self.cur_B[key].to(self.device)
-            self.vec_b[key] = self.vec_b[key].to(self.device)
-            self.vec_d[key] = self.vec_d[key].to(self.device)
+        self.detach()
+        self.to(self.device)
         if "run_sum" in self.cl_merge:
             for key in self.lora_keys:
+                eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                 if self.cur_task > 0:
                     self.optimization_dict[key] += self.old_delta[key]
                 self.optimization_dict[key] += (
-                    (self.vec_b[key] * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False))
-                    @ self.cur_B[key]
-                    @ (self.vec_d[key] * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False))
-                    @ self.cur_A[key]
+                    (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                 )
         elif "run_mean" in self.cl_merge:
             for key in self.lora_keys:
+                eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                 if self.cur_task > 0:
                     tmp = (self.old_delta[key] * self.cur_task) + (
-                        (self.vec_b[key] * torch.eye(self.vec_b[key].shape[0]))
-                        @ self.cur_B[key]
-                        @ self.vec_d[key]
-                        * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                        @ self.cur_A[key]
+                        (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                     )
                     self.optimization_dict[key] += tmp / (self.cur_task + 1)
                 else:
                     self.optimization_dict[key] += (
-                        (self.vec_b[key] * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False))
-                        @ self.cur_B[key]
-                        @ (
-                            self.vec_d[key]
-                            * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                        )
-                        @ self.cur_A[key]
+                        (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                     )
         elif "individual" in self.cl_merge:
             if "sum" in self.cl_merge:
                 for key in self.lora_keys:
+                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     if self.cur_task > 0:
-                        tmp = (self.old_delta[key] * self.cur_task) + self.vec_b[key] * torch.eye(
-                            self.vec_b[key].shape[0]
-                        ) @ self.cur_B[key] @ self.vec_d[key] * torch.eye(
-                            self.vec_d[key].shape[0], device=self.device, requires_grad=False
-                        ) @ self.cur_A[
-                            key
-                        ]
+                        tmp = (self.old_delta[key] * self.cur_task) + (
+                            (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
+                        )
                         self.optimization_dict[key] += tmp
                     else:
                         self.optimization_dict[key] += (
-                            (
-                                self.vec_b[key]
-                                * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_B[key]
-                            @ (
-                                self.vec_d[key]
-                                * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_A[key]
+                            (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                         )
             elif "mean" in self.cl_merge:
                 for key in self.lora_keys:
+                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
+                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     if self.cur_task > 0:
                         tmp = (self.old_delta[key] * self.cur_task) + (
-                            (
-                                self.vec_b[key]
-                                * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_B[key]
-                            @ (
-                                self.vec_d[key]
-                                * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_A[key]
+                            (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                         )
                         self.optimization_dict[key] += tmp / (self.cur_task + 1)
                     else:
                         self.optimization_dict[key] += (
-                            (
-                                self.vec_b[key]
-                                * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_B[key]
-                            @ (
-                                self.vec_d[key]
-                                * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
-                            )
-                            @ self.cur_A[key]
+                            (self.vec_b[key] * eye_b) @ self.cur_B[key] @ (self.vec_d[key] * eye_d) @ self.cur_A[key]
                         )
-
         else:
             raise ValueError("Invalid cl_merge type")
 
@@ -356,3 +312,12 @@ class Vera(Lora):
         for key in self.lora_keys:
             self.vec_b[key] = self.vec_b[key].to(device)
             self.vec_d[key] = self.vec_d[key].to(device)
+
+    def detach(self, only_lora: bool = False):
+        for key in self.lora_keys:
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.cur_B[key] = self.cur_B[key].detach()
+            self.cur_A[key] = self.cur_A[key].detach()
+            if not only_lora:
+                self.vec_b[key] = self.vec_b[key].detach()
+                self.vec_d[key] = self.vec_d[key].detach()
