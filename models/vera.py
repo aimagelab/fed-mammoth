@@ -79,8 +79,10 @@ class Vera(Lora):
             self.cur_A[key] = _kaiming_init(
                 (self.cur_A[key].shape[0], self.cur_A[key].shape[1]), generator=generator
             ).to(self.device)
-            self.vec_b[key] = nn.Parameter(torch.zeros(d), requires_grad=True).to(self.device)
-            self.vec_d[key] = nn.Parameter(torch.ones(r) * self.d_initial, requires_grad=True).to(self.device)
+            self.vec_b[key] = nn.Parameter(torch.zeros(d, 1), requires_grad=True).to(self.device)
+            self.vec_d[key] = nn.Parameter(torch.ones(r, 1) * self.d_initial, requires_grad=True).to(self.device)
+        # for key in self.lora_keys:
+        #    print(key, self.cur_B[key].shape, self.cur_A[key].shape, self.vec_b[key].shape, self.vec_d[key].shape)
 
     def debug_matrices_create(self):
         for key in self.lora_keys:
@@ -121,20 +123,32 @@ class Vera(Lora):
         for key in self.lora_keys:
             if self.cur_task > 0 and not "individual" in self.cl_merge:
                 optimization_dict[key] += self.old_delta[key]
-            optimization_dict[key] += (
-                (self.vec_b[key] * torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False))
-                @ self.cur_B[key]
-                @ (self.vec_d[key] * torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False))
-                @ self.cur_A[key]
-            )
+            # TODO: correct all instances of this by avoiding using torch.eye
+            optimization_dict[key] += (self.vec_b[key] * self.cur_B[key]) @ (self.vec_d[key] * self.cur_A[key])
         return optimization_dict
+
+    def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
+        self.optimizer.zero_grad()
+        optimization_dict = self.get_optimization_dict()
+        # optimization_dict = super().get_optimization_dict()
+        with self.fabric.autocast():
+            outputs = functional_call(self.network, optimization_dict, inputs)[
+                :, self.cur_offset : self.cur_offset + self.cpt
+            ]
+            loss = self.loss(outputs, labels % self.cpt)
+
+        if update:
+            self.fabric.backward(loss)
+            # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
+            self.optimizer.step()
+        return loss.item()
 
     def begin_task(self, n_classes_per_task: int):
         # BaseModel.begin_task(self, n_classes_per_task)
         self.cur_task += 1
         self.cpt = n_classes_per_task
         self.cur_offset = self.cur_task * self.cpt
-        # adjust grads nd move to device
+        # adjust grads and move to device
         self.detach()
         self.to(self.device)
         # vera begin task

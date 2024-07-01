@@ -32,7 +32,13 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
             task_accuracies.append(round(task_correct / task_total * 100, 2))
 
     model.train(training_status)
-    print(f"Mean accuracy up to task {task + 1}:", round(correct / total * 100, 2), "%", "Task accuracies:", task_accuracies)
+    print(
+        f"Mean accuracy up to task {task + 1}:",
+        round(correct / total * 100, 2),
+        "%",
+        "Task accuracies:",
+        task_accuracies,
+    )
     return round(correct / total * 100, 2)
 
 
