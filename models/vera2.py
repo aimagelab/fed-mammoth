@@ -45,8 +45,8 @@ def _kaiming_init(
         return tensor.uniform_(-bound, bound, generator=generator)
 
 
-@register_model("vera")
-class Vera(Lora):
+@register_model("vera2")
+class Vera(BaseModel):
     def __init__(
         self,
         fabric,
@@ -63,27 +63,66 @@ class Vera(Lora):
         d_initial: float = 0.1,
     ):
         super(Vera, self).__init__(
-            fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
+            fabric, network, device, optimizer, lr, wd_reg  # , avg_type, lora_alpha, r, lora_head, cl_merge
         )
+        self.avg_type = avg_type
+        self.lora_alpha = lora_alpha
+        self.r = r
+        self.cl_merge = cl_merge
+        self.lora_keys = []
+        self.lora_params = {}
+        self.lora_params_B = {}
+        self.lora_params_A = {}
+        self.optimizer_str = optimizer
+        self.lr = lr
+        self.wd_reg = wd_reg
+        self.lora_head = lora_head
+        self.head_keys = []
+        self.old_delta = {}
         self.d_initial = d_initial
         self.vec_b = {}
         self.vec_d = {}
         self.pre_b = {}
         self.pre_d = {}
-        for key in self.lora_keys:
-            d = self.cur_B[key].shape[0]
-            generator = torch.Generator().manual_seed(0)
-            self.cur_B[key] = _kaiming_init(
-                (self.cur_B[key].shape[0], self.cur_B[key].shape[1]), generator=generator
-            ).to(self.device)
-            self.cur_A[key] = _kaiming_init(
-                (self.cur_A[key].shape[0], self.cur_A[key].shape[1]), generator=generator
-            ).to(self.device)
-            self.vec_b[key] = nn.Parameter(torch.zeros(d, 1), requires_grad=True).to(self.device)
-            self.vec_d[key] = nn.Parameter(torch.ones(r, 1) * self.d_initial, requires_grad=True).to(self.device)
-        # for key in self.network.state_dict().keys():
-        #    # print(key, self.cur_B[key].shape, self.cur_A[key].shape, self.vec_b[key].shape, self.vec_d[key].shape)
-        #    print(key, self.network.state_dict()[key].shape)
+        max_dim = (0, 0)
+        for name, param in network.named_parameters():
+            param.requires_grad = False  # freeze all the parameters
+            if not self.lora_head and "head" in name:
+                self.head_keys.append(name)
+            if ("qkv" in name and "weight" in name) or (
+                ("mlp" in name and "weight" in name)
+                or ("proj" in name and "weight" in name and "attn" in name)
+                or (self.lora_head and "head" in name and "weight" in name)
+            ):
+                self.lora_keys.append(name)
+                self.lora_params_B[name] = [param.shape[0], r]
+                self.lora_params_A[name] = [r, param.shape[1]]
+                self.old_delta[name] = nn.Parameter(
+                    torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
+                ).to(self.device)
+                self.vec_b[name] = nn.Parameter(torch.zeros(param.shape[0], 1), requires_grad=True).to(self.device)
+                self.vec_d[name] = nn.Parameter(torch.ones(r, 1) * self.d_initial, requires_grad=True).to(self.device)
+                max_dim = (max(max_dim[0], param.shape[0]), max(max_dim[1], param.shape[1]))
+        # for key in self.lora_keys:
+        #    d = self.cur_B[0 : self.lora_params[key][0], 0 : self.lora_params[key][1]].shape[0]
+        #    self.vec_b[key] = nn.Parameter(torch.zeros(d, 1), requires_grad=True).to(self.device)
+        #    self.vec_d[key] = nn.Parameter(torch.ones(r, 1) * self.d_initial, requires_grad=True).to(self.device)
+        generator = torch.Generator().manual_seed(0)
+        self.cur_B = _kaiming_init((max_dim[0], max_dim[1]), generator=generator)
+        self.cur_A = _kaiming_init((max_dim[0], max_dim[1]), generator=generator)
+        self.cur_A.requires_grad = False
+        self.cur_B.requires_grad = False
+        self.optimization_dict = {}
+        if not self.lora_head:
+            self.head = {
+                key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device)
+                for key in self.head_keys
+            }
+
+    def vera_multiply(self, key):
+        return (self.vec_b[key] * self.cur_B[0 : self.lora_params_B[key][0], 0 : self.lora_params_B[key][1]]) @ (
+            self.vec_d[key] * self.cur_A[0 : self.lora_params_A[key][0], 0 : self.lora_params_A[key][1]]
+        )
 
     def debug_matrices_create(self):
         for key in self.lora_keys:
@@ -124,8 +163,7 @@ class Vera(Lora):
         for key in self.lora_keys:
             if self.cur_task > 0 and not "individual" in self.cl_merge:
                 optimization_dict[key] += self.old_delta[key]
-            # TODO: correct all instances of this by avoiding using torch.eye
-            optimization_dict[key] += self.vera_mult(key)
+            optimization_dict[key] += self.vera_multiply(key)
         return optimization_dict
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -144,8 +182,8 @@ class Vera(Lora):
             self.optimizer.step()
         return loss.item()
 
-    def vera_mult(self, key):
-        return (self.vec_b[key] * self.cur_B[key]) @ (self.vec_d[key] * self.cur_A[key])
+    def forward(self, x):
+        return functional_call(self.network, self.optimization_dict, x)
 
     def begin_task(self, n_classes_per_task: int):
         # BaseModel.begin_task(self, n_classes_per_task)
@@ -159,24 +197,15 @@ class Vera(Lora):
         if self.cur_task > 0:
             if self.cl_merge == "run_sum":
                 for key in self.lora_keys:
-                    self.old_delta[key] += self.vera_mult(key)
+                    self.old_delta[key] += self.vera_multiply(key)
             elif self.cl_merge == "run_mean" or "individual" in self.cl_merge:
                 for key in self.lora_keys:
-                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     self.old_delta[key] = (
-                        self.old_delta[key] * (self.cur_task - 1) + self.vera_mult(key)
+                        self.old_delta[key] * (self.cur_task - 1) + self.vera_multiply(key)
                     ) / self.cur_task
             else:
                 raise ValueError("Invalid cl_merge type")
             for key in self.lora_keys:
-                generator = torch.Generator().manual_seed(0)
-                self.cur_B[key] = _kaiming_init(
-                    (self.cur_B[key].shape[0], self.cur_B[key].shape[1]), generator=generator
-                ).to(self.device)
-                self.cur_A[key] = _kaiming_init(
-                    (self.cur_A[key].shape[0], self.cur_A[key].shape[1]), generator=generator
-                ).to(self.device)
                 self.vec_b[key] = nn.Parameter(torch.zeros_like(self.vec_b[key]), requires_grad=True).to(self.device)
                 self.vec_d[key] = nn.Parameter(
                     torch.ones_like(self.vec_d[key]) * self.d_initial, requires_grad=True
@@ -228,10 +257,23 @@ class Vera(Lora):
 
     def get_server_info(self):
         self.detach()
-        server_info = super().get_server_info()
+        server_info = {}
+        server_info["cur_A"] = deepcopy(self.cur_A)
+        server_info["cur_B"] = deepcopy(self.cur_B)
+        server_info["old_delta"] = deepcopy(self.old_delta)
         server_info["vec_b"] = deepcopy(self.vec_b)
         server_info["vec_d"] = deepcopy(self.vec_d)
+        if not self.lora_head:
+            server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info
+
+    def end_round_client(self, dataloader: DataLoader):
+        if not self.lora_head:
+            sd = self.network.state_dict()
+            for key in self.head_keys:
+                sd[key] = self.head[key]
+            self.network.load_state_dict(sd)
+        return super().end_round_client(dataloader)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -270,53 +312,51 @@ class Vera(Lora):
         self.to(self.device)
         if "run_sum" in self.cl_merge:
             for key in self.lora_keys:
-                eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                 if self.cur_task > 0:
                     self.optimization_dict[key] += self.old_delta[key]
-                self.optimization_dict[key] += self.vera_mult(key)
+                self.optimization_dict[key] += self.vera_multiply(key)
         elif "run_mean" in self.cl_merge:
             for key in self.lora_keys:
-                eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                 if self.cur_task > 0:
-                    tmp = (self.old_delta[key] * self.cur_task) + (self.vera_mult(key))
+                    tmp = (self.old_delta[key] * self.cur_task) + self.vera_multiply(key)
                     self.optimization_dict[key] += tmp / (self.cur_task + 1)
                 else:
-                    self.optimization_dict[key] += self.vera_mult(key)
+                    self.optimization_dict[key] += self.vera_multiply(key)
         elif "individual" in self.cl_merge:
             if "sum" in self.cl_merge:
                 for key in self.lora_keys:
-                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     if self.cur_task > 0:
-                        tmp = (self.old_delta[key] * self.cur_task) + (self.vera_mult(key))
+                        tmp = (self.old_delta[key] * self.cur_task) + self.vera_multiply(key)
                         self.optimization_dict[key] += tmp
                     else:
-                        self.optimization_dict[key] += self.vera_mult(key)
+                        self.optimization_dict[key] += self.vera_multiply(key)
             elif "mean" in self.cl_merge:
                 for key in self.lora_keys:
-                    eye_b = torch.eye(self.vec_b[key].shape[0], device=self.device, requires_grad=False)
-                    eye_d = torch.eye(self.vec_d[key].shape[0], device=self.device, requires_grad=False)
                     if self.cur_task > 0:
-                        tmp = (self.old_delta[key] * self.cur_task) + (self.vera_mult(key))
+                        tmp = (self.old_delta[key] * self.cur_task) + self.vera_multiply(key)
                         self.optimization_dict[key] += tmp / (self.cur_task + 1)
                     else:
-                        self.optimization_dict[key] += self.vera_mult(key)
+                        self.optimization_dict[key] += self.vera_multiply(key)
         else:
             raise ValueError("Invalid cl_merge type")
 
     def to(self, device="cpu"):
-        super().to(device)
+        # super().to(device)
+        self.cur_A = self.cur_A.to(device)
+        self.cur_B = self.cur_B.to(device)
         for key in self.lora_keys:
             self.vec_b[key] = self.vec_b[key].to(device)
             self.vec_d[key] = self.vec_d[key].to(device)
+            self.old_delta[key] = self.old_delta[key].to(device)
+        if not self.lora_head:
+            for key in self.head_keys:
+                self.head[key] = self.head[key].to(device)
 
     def detach(self, only_lora: bool = False):
+        self.cur_A = self.cur_A.detach()
+        self.cur_B = self.cur_B.detach()
         for key in self.lora_keys:
             self.old_delta[key] = self.old_delta[key].detach()
-            self.cur_B[key] = self.cur_B[key].detach()
-            self.cur_A[key] = self.cur_A[key].detach()
             if not only_lora:
                 self.vec_b[key] = self.vec_b[key].detach()
                 self.vec_d[key] = self.vec_d[key].detach()
