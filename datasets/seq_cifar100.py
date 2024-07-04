@@ -93,7 +93,7 @@ class JointCifar100(SequentialCifar100):
 
 
 @register_dataset("joint-cifar100_224")
-class JointCifar100(SequentialCifar100_224):
+class JointCifar100_224(SequentialCifar100_224):
     N_CLASSES_PER_TASK = 100
     N_TASKS = 1
     INPUT_SHAPE = (224, 224, 3)
