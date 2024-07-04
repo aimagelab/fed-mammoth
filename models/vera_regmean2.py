@@ -30,7 +30,7 @@ class VeraRegMean(Vera, RegMean):
         wd_reg: float = 0.1,
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
-        r: int = 16,
+        r: int = 1024,
         lora_head: str_to_bool = False,
         cl_merge: str = "individual_mean",
         regmean_all: str_to_bool = True,
@@ -168,6 +168,7 @@ class VeraRegMean(Vera, RegMean):
             norm_weights = [w / sum(weights) for w in weights]
         cl_b = [client["vec_b"] for client in client_info]  # list of B matrices for all clients
         cl_d = [client["vec_d"] for client in client_info]  # list of A matrices for all clients
+        self.to("cpu")
         # regmean will always be applied to the head, optionally to the other layers
         # lora instead will always be applied to the other layers, optionally to the head
         dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
@@ -234,7 +235,7 @@ class VeraRegMean(Vera, RegMean):
                     ).sum(0)
 
         self.network.load_state_dict(sd)
-
+        self.to(self.device)
         self.set_optimization()
 
     def to(self, device="cpu"):
