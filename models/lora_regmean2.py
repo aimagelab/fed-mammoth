@@ -11,12 +11,13 @@ from copy import deepcopy
 from utils.tools import str_to_bool
 
 from models.lora import Lora, merge_AB, zero_pad
+from models.regmean import RegMean
 from tqdm import tqdm
 import math
 
 
-@register_model("lora_regmean")
-class LoraRegMean(Lora):
+@register_model("lora_regmean2")
+class LoraRegMean(Lora, RegMean):
     def __init__(
         self,
         fabric,
@@ -35,43 +36,25 @@ class LoraRegMean(Lora):
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
     ) -> None:
-        super(LoraRegMean, self).__init__(
-            fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
-        )
-        self.reg_dtype_64 = reg_dtype_64
         self.lora_head = False
-        self.avg_type = avg_type
-        self.regmean_all = regmean_all
-        self.alpha_regmean = alpha_regmean
-        self.lora_modules = []
-        self.gram_modules = []
+        self.reg_dtype_64 = reg_dtype_64
         self.middle_names = {}  # conversion from state_dict() names to the names of the modules
-        self.gram_dtype = (
-            torch.float32
-            if gram_dtype == "32"
-            else torch.float16 if gram_dtype == "16" else torch.bfloat16 if gram_dtype == "b16" else torch.float64
+        Lora.__init__(
+            self, fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
         )
-        # layers to be used for regmean: if regmean_all is True, all layers are used, otherwise only the head
-        for name, module in self.network.named_modules():
-            if (
-                (
-                    (("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
-                    or "head" in name
-                )
-                and len(list(module.parameters())) > 0
-                and len(list(module.children())) == 0
-            ):
-                self.lora_modules.append(name)
-                self.gram_modules.append(name)
-                self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
-        self.features = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
-        self.gram = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
+        RegMean.__init__(
+            self, fabric, network, device, optimizer, lr, wd_reg, avg_type, regmean_all, alpha_regmean, gram_dtype
+        )
+        for name in self.gram_modules:
+            self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         self.fed_weights = {}
         for key in self.lora_keys:
-            self.fed_weights[key] = torch.zeros_like((self.cur_B[key] @ self.cur_A[key]))
+            self.fed_weights[key] = torch.zeros_like((self.cur_B[key].detach() @ self.cur_A[key].detach()))
 
     def get_optimization_dict(self):
-        opti_dict = super().get_optimization_dict()
+        opti_dict = Lora.get_optimization_dict(
+            self,
+        )
         for key in self.lora_keys:
             opti_dict[key] += self.fed_weights[key]
         return opti_dict
@@ -93,32 +76,13 @@ class LoraRegMean(Lora):
                 raise ValueError("Invalid cl_merge type")
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
-        self.old_delta = deepcopy(server_info["old_delta"])
+        Lora.begin_round_client(self, dataloader, server_info)
         self.fed_weights = deepcopy(server_info["fed_weights"])
-        self.cur_B = deepcopy(server_info["cur_B"])
-        self.cur_A = deepcopy(server_info["cur_A"])
-        if not self.lora_head:
-            self.network.model.head.load_state_dict(server_info["head"])
-            self.head = {
-                key: nn.Parameter(self.network.state_dict()[key].clone().detach(), requires_grad=True).to(self.device)
-                for key in self.head_keys
-            }
-
-        OptimizerClass = getattr(torch.optim, self.optimizer_str)
-        if not self.lora_head:
-            self.optimizer = OptimizerClass(
-                list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values()),
-                lr=self.lr,
-                weight_decay=self.wd_reg,
-            )
-        else:
-            self.optimizer = OptimizerClass(
-                list(self.cur_B.values()) + list(self.cur_A.values()), lr=self.lr, weight_decay=self.wd_reg
-            )
-        self.optimizer = self.fabric.setup_optimizers(self.optimizer)
 
     def begin_round_server(self):
-        super().begin_round_server()
+        Lora.begin_round_server(
+            self,
+        )
         for key in self.lora_keys:
             self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
             self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
@@ -128,25 +92,20 @@ class LoraRegMean(Lora):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+        for key in self.lora_keys:
+            self.old_delta[key].requires_grad = False
+            self.cur_B[key].requires_grad = False
+            self.cur_A[key].requires_grad = False
+            self.fed_weights[key].requires_grad = False
+            self.fed_weights[key] = self.fed_weights[key].to(self.device)
+            self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
         if "run_sum" in self.cl_merge:
             for key in self.lora_keys:
-                self.old_delta[key].requires_grad = False
-                self.cur_B[key].requires_grad = False
-                self.cur_A[key].requires_grad = False
-                self.fed_weights[key].requires_grad = False
-                self.fed_weights[key] = self.fed_weights[key].to(self.device)
-                self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                 if self.cur_task > 0:
                     self.optimization_dict[key] += self.old_delta[key]
                 self.optimization_dict[key] += self.fed_weights[key]
         elif "run_mean" in self.cl_merge:
             for key in self.lora_keys:
-                self.old_delta[key].requires_grad = False
-                self.cur_B[key].requires_grad = False
-                self.cur_A[key].requires_grad = False
-                self.fed_weights[key].requires_grad = False
-                self.fed_weights[key] = self.fed_weights[key].to(self.device)
-                self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                 if self.cur_task > 0:
                     tmp = (self.old_delta[key] * self.cur_task) + self.fed_weights[key]
                     self.optimization_dict[key] += tmp / (self.cur_task + 1)
@@ -155,12 +114,6 @@ class LoraRegMean(Lora):
         elif "individual" in self.cl_merge:
             if "sum" in self.cl_merge:
                 for key in self.lora_keys:
-                    self.old_delta[key].requires_grad = False
-                    self.cur_B[key].requires_grad = False
-                    self.cur_A[key].requires_grad = False
-                    self.fed_weights[key].requires_grad = False
-                    self.fed_weights[key] = self.fed_weights[key].to(self.device)
-                    self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                     if self.cur_task > 0:
                         tmp = (self.old_delta[key] * self.cur_task) + self.fed_weights[key]
                         self.optimization_dict[key] += tmp
@@ -169,12 +122,6 @@ class LoraRegMean(Lora):
 
             elif "mean" in self.cl_merge:
                 for key in self.lora_keys:
-                    self.old_delta[key].requires_grad = False
-                    self.cur_B[key].requires_grad = False
-                    self.cur_A[key].requires_grad = False
-                    self.fed_weights[key].requires_grad = False
-                    self.fed_weights[key] = self.fed_weights[key].to(self.device)
-                    self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                     if self.cur_task > 0:
                         tmp = (self.old_delta[key] * self.cur_task) + self.fed_weights[key].detach()
                         self.optimization_dict[key] += tmp / (self.cur_task + 1)
@@ -182,51 +129,20 @@ class LoraRegMean(Lora):
                         self.optimization_dict[key] += self.fed_weights[key].detach()
 
     def end_round_client(self, dataloader: DataLoader):
-        super().end_round_client(dataloader)
-        hooks = {name: None for name in self.gram_modules}
-        for name, module in self.network.named_modules():
-            if name in self.gram_modules:
-                # module.forward_handle = module.register_forward_hook(self.hook_forward)
-                hooks[name] = module.register_forward_hook(self.hook_handler(name))
+        Lora.end_round_client(self, dataloader)
         self.set_optimization()
-        with torch.no_grad():
-            print()
-            for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
-                x, y = x.to(self.device), y.to(self.device)
-                self.forward(x)
-        for name, module in self.network.named_modules():
-            if name in self.gram_modules:
-                self.features[name] = self.features[name].to("cpu")
-                shape = self.features[name].shape[-1]
-                self.gram[name] = (
-                    self.features[name] * self.alpha_regmean
-                    + (1 - self.alpha_regmean) * torch.eye(shape, dtype=self.gram_dtype) * self.features[name]
-                )
-                self.features[name] = torch.tensor([], dtype=self.gram_dtype)
-                hooks[name].remove()
-
-    def hook_handler(self, name):
-        def hook_forward(module, inputs, _):
-            x = inputs[0].detach().to(self.gram_dtype)
-            if len(x.shape) == 3:
-                x = x.view(-1, x.size(-1))
-            tmp = torch.zeros(x.size(-1), x.size(-1), device=self.device, dtype=self.gram_dtype)
-            torch.matmul(x.T, x, out=tmp)
-            if len(self.features[name]) == 0:
-                self.features[name] = tmp
-            else:
-                self.features[name] += tmp
-
-        return hook_forward
+        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
 
     def get_client_info(self, dataloader: DataLoader):
-        client_info = super().get_client_info(dataloader)
+        client_info = Lora.get_client_info(self, dataloader)
         client_info["grams"] = deepcopy(self.gram)
         client_info["state_dict"] = deepcopy(self.network.state_dict())
         return client_info
 
     def get_server_info(self):
-        server_info = super().get_server_info()
+        server_info = Lora.get_server_info(
+            self,
+        )
         server_info["old_delta"] = deepcopy(self.old_delta)
         server_info["fed_weights"] = deepcopy(self.fed_weights)
         server_info["head"] = deepcopy(self.network.model.head.state_dict())
@@ -243,7 +159,6 @@ class LoraRegMean(Lora):
         cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
         # regmean will always be applied to the head, optionally to the other layers
         # lora instead will always be applied to the other layers, optionally to the head
-        dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
         if not self.regmean_all:
             # fedavg on Lora matrices for all layers except head
             for key in self.lora_keys:
@@ -253,9 +168,9 @@ class LoraRegMean(Lora):
                 self.cur_A[key] = nn.Parameter(
                     torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_A, norm_weights)]).sum(0)
                 )
-
         # regmean solution
         else:
+            dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
             keys = list(self.network.state_dict().keys())
             # self.fed_weights = {key: None for key in self.lora_keys}
             for key in self.lora_keys:
@@ -301,6 +216,6 @@ class LoraRegMean(Lora):
         self.set_optimization()
 
     def to(self, device="cpu"):
-        super().to(device)
+        Lora.to(self, device)
         for key in self.lora_keys:
             self.fed_weights[key] = self.fed_weights[key].to(device)

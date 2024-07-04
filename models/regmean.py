@@ -93,7 +93,6 @@ class RegMean(BaseModel):
         self.network.load_state_dict(sd)
 
     def end_round_client(self, dataloader: DataLoader):
-        super().end_round_client(dataloader)
         hooks = {name: None for name in self.gram_modules}
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
@@ -103,7 +102,6 @@ class RegMean(BaseModel):
             print()
             for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
                 x, y = x.to(self.device), y.to(self.device)
-                # TODO handle the fact that the network is not updated
                 self.forward(x)
                 # if id == 2:
                 #    break

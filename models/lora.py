@@ -233,9 +233,6 @@ class Lora(BaseModel):
             )
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
 
-    def begin_round_server(self):
-        return super().begin_round_server()
-
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict()
@@ -288,7 +285,6 @@ class Lora(BaseModel):
             for key in self.head_keys:
                 sd[key] = self.head[key]
             self.network.load_state_dict(sd)
-        return super().end_round_client(dataloader)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":

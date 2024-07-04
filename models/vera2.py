@@ -273,7 +273,6 @@ class Vera(BaseModel):
             for key in self.head_keys:
                 sd[key] = self.head[key]
             self.network.load_state_dict(sd)
-        return super().end_round_client(dataloader)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -341,7 +340,7 @@ class Vera(BaseModel):
             raise ValueError("Invalid cl_merge type")
 
     def to(self, device="cpu"):
-        # super().to(device)
+        self.network.to(device)
         self.cur_A = self.cur_A.to(device)
         self.cur_B = self.cur_B.to(device)
         for key in self.lora_keys:
