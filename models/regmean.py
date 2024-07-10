@@ -60,20 +60,25 @@ class RegMean(BaseModel):
                 # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
                 # list(module.parameters())
                 if (
-                    (
-                        (("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
+                    len(list(module.parameters())) > 0
+                    and len(list(module.children())) == 0
+                    and (
+                        (
+                            (
+                                ("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name))
+                                and self.regmean_all
+                            )
+                            and (
+                                only_square <= 0
+                                or module.state_dict()["weight"].shape[0]
+                                == module.state_dict()["weight"].shape[1]
+                                == only_square
+                            )
+                        )
                         or "head" in name
                     )
-                    and len(list(module.parameters())) > 0
-                    and len(list(module.children())) == 0
                 ):
-                    if (
-                        only_square <= 0
-                        or module.state_dict()["weight"].shape[0]
-                        == module.state_dict()["weight"].shape[1]
-                        == only_square
-                    ):
-                        self.gram_modules.append(name)
+                    self.gram_modules.append(name)
         else:
             for name, module in self.network.named_modules():
                 if "head" in name and len(list(module.parameters())) > 0 and len(list(module.children())) == 0:
