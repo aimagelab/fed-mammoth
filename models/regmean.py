@@ -30,6 +30,7 @@ class RegMean(BaseModel):
         alpha_regmean: float = 0.5,
         gram_dtype: str = "32",
         slca: str_to_bool = False,
+        only_square: int = 0,
     ) -> None:
         if slca:
             backbone_params = []
@@ -66,7 +67,13 @@ class RegMean(BaseModel):
                     and len(list(module.parameters())) > 0
                     and len(list(module.children())) == 0
                 ):
-                    self.gram_modules.append(name)
+                    if (
+                        only_square <= 0
+                        or module.state_dict()["weight"].shape[0]
+                        == module.state_dict()["weight"].shape[1]
+                        == only_square
+                    ):
+                        self.gram_modules.append(name)
         else:
             for name, module in self.network.named_modules():
                 if "head" in name and len(list(module.parameters())) > 0 and len(list(module.children())) == 0:

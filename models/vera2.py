@@ -61,6 +61,7 @@ class Vera(BaseModel):
         lora_head: str_to_bool = False,
         cl_merge: str = "individual_mean",
         d_initial: float = 0.1,
+        only_square: int = 0,
     ):
         super(Vera, self).__init__(
             fabric, network, device, optimizer, lr, wd_reg  # , avg_type, lora_alpha, r, lora_head, cl_merge
@@ -94,6 +95,8 @@ class Vera(BaseModel):
                 or ("proj" in name and "weight" in name and "attn" in name)
                 or (self.lora_head and "head" in name and "weight" in name)
             ):
+                if only_square > 0 and param.shape[0] != param.shape[1]:
+                    continue
                 self.lora_keys.append(name)
                 self.lora_params_B[name] = [param.shape[0], r]
                 self.lora_params_A[name] = [r, param.shape[1]]
