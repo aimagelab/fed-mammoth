@@ -9,6 +9,67 @@ from models.utils import BaseModel
 from networks.vit_prompt_hgp import VitHGP
 import os
 from utils.tools import str_to_bool
+import math
+
+
+class _LRScheduler(object):
+    def __init__(self, optimizer, last_epoch=-1):
+        if not isinstance(optimizer, torch.optim.Optimizer):
+            raise TypeError("{} is not an Optimizer".format(type(optimizer).__name__))
+        self.optimizer = optimizer
+        if last_epoch == -1:
+            for group in optimizer.param_groups:
+                group.setdefault("initial_lr", group["lr"])
+        else:
+            for i, group in enumerate(optimizer.param_groups):
+                if "initial_lr" not in group:
+                    raise KeyError(
+                        "param 'initial_lr' is not specified "
+                        "in param_groups[{}] when resuming an optimizer".format(i)
+                    )
+        self.base_lrs = list(map(lambda group: group["initial_lr"], optimizer.param_groups))
+        self.step(last_epoch + 1)
+        self.last_epoch = last_epoch
+
+    def state_dict(self):
+        """Returns the state of the scheduler as a :class:`dict`.
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer.
+        """
+        return {key: value for key, value in self.__dict__.items() if key != "optimizer"}
+
+    def load_state_dict(self, state_dict):
+        """Loads the schedulers state.
+        Arguments:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
+
+    def get_lr(self):
+        raise NotImplementedError
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch + 1
+        self.last_epoch = epoch
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group["lr"] = lr
+
+
+class CosineSchedule(_LRScheduler):
+
+    def __init__(self, optimizer, K):
+        self.K = K
+        super().__init__(optimizer, -1)
+
+    def cosine(self, base_lr):
+        if self.last_epoch == 0:
+            return base_lr
+        return base_lr * math.cos((99 * math.pi * (self.last_epoch)) / (200 * (self.K - 1)))
+
+    def get_lr(self):
+        return [self.cosine(base_lr) for base_lr in self.base_lrs]
 
 
 @register_model("hgp")
@@ -25,6 +86,7 @@ class HGP(BaseModel):
         how_many: int = 256,
         full_cov: str_to_bool = False,
         linear_probe: str_to_bool = False,
+        num_epochs: int = 5,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
         super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
@@ -41,6 +103,8 @@ class HGP(BaseModel):
         self.full_cov = full_cov
         self.do_linear_probe = linear_probe
         self.done_linear_probe = False
+        self.num_epochs = num_epochs
+        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -70,6 +134,8 @@ class HGP(BaseModel):
 
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
+        if self.cur_task > 0:
+            self.network.prompt.process_task_count()
         if self.do_linear_probe:
             self.done_linear_probe = False
 
@@ -192,9 +258,14 @@ class HGP(BaseModel):
             self.linear_probe(dataloader)
             self.done_linear_probe = True
             # restore correct optimizer
-            params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
-            optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
-            self.optimizer = self.fabric.setup_optimizers(optimizer)
+        params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
+        optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
+        self.optimizer = self.fabric.setup_optimizers(optimizer)
+        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+
+    def end_epoch(self):
+        self.scheduler.step()
+        return None
 
     def get_client_info(self, dataloader: DataLoader):
         return {

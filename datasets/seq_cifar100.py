@@ -65,6 +65,31 @@ class SequentialCifar100_224(SequentialCifar100):
     INPUT_SHAPE = (224, 224, 3)
 
 
+@register_dataset("seq-cifar100_224_hgp")
+class SequentialCifar100_224_hgp(SequentialCifar100):
+    MEAN_NORM = (0.0, 0.0, 0.0)
+    STD_NORM = (1.0, 1.0, 1.0)
+    normalize = transforms.Normalize(MEAN_NORM, STD_NORM)
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(
+                size=(224, 224), interpolation=transforms.functional.InterpolationMode.BICUBIC
+            ),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(224, interpolation=transforms.functional.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+        ]
+    )
+    INPUT_SHAPE = (224, 224, 3)
+
+
 @register_dataset("seq-cifar100_224_regmean")
 class SequentialCifar100_regmean(SequentialCifar100_224):
     MEAN_NORM = [0.5071, 0.4865, 0.4409]

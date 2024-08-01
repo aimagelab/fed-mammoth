@@ -78,6 +78,9 @@ class BaseModel(nn.Module):
     def end_round_server(self, client_info: List[dict]):
         pass
 
+    def end_epoch(self):
+        pass
+
     def get_client_info(self, dataloader: DataLoader):
         pass
 

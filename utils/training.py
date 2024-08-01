@@ -16,6 +16,8 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     task_accuracies = []
     training_status = model.training
     model.eval()
+    start_class = 0
+    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
@@ -23,7 +25,7 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
             for test_loader in test_loaders:
                 test_loader = fabric.setup_dataloaders(test_loader)
                 for inputs, labels in test_loader:
-                    outputs = model(inputs)
+                    outputs = model(inputs)[:, start_class:end_class]
                     pred = torch.max(outputs, dim=1)[1]
                     task_correct += (pred == labels).sum().item()
                     task_total += labels.shape[0]
@@ -114,6 +116,7 @@ def train(
                             )
                         if args["wandb"]:
                             wandb.log({"train_loss": train_loss})
+                    model.end_epoch()
 
                 model.end_round_client(train_loader)
                 model.to("cpu")
