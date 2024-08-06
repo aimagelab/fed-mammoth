@@ -9,16 +9,18 @@ import timm.models.vision_transformer as timm_vit
 from functools import partial
 from timm.models.vision_transformer import PatchEmbed
 from timm.models.layers import trunc_normal_, DropPath
+from utils.tools import str_to_bool
 
 
 class HGPPrompt(nn.Module):
-    def __init__(self, emb_d, n_tasks, prompt_param, key_dim=768):
+    def __init__(self, emb_d, n_tasks, prompt_param, key_dim=768, prompt_pool=False):
         super().__init__()
         self.task_count = 0
         self.emb_d = emb_d
         self.key_d = key_dim
         self.n_tasks = n_tasks
         self._init_smart(emb_d, prompt_param)
+        self.prompt_pool = prompt_pool
 
         # e prompt init
         for e in self.e_layers:
@@ -38,6 +40,8 @@ class HGPPrompt(nn.Module):
         self.e_layers = [0, 1, 2, 3, 4]
 
     def process_task_count(self):
+        if not self.prompt_pool:
+            return
         self.task_count += 1
         for e in self.e_layers:
             K = getattr(self, f"e_k_{e}")
@@ -124,8 +128,8 @@ class HGPPrompt(nn.Module):
             K = getattr(self, f"e_k_{l}")
             p = getattr(self, f"e_p_{l}")
             pt = int(self.e_pool_size / (self.n_tasks))
-            s = int(self.task_count * pt)
-            f = int((self.task_count + 1) * pt)
+            s = int(self.task_count * pt) if not self.prompt_pool else 0
+            f = int((self.task_count + 1) * pt) if not self.prompt_pool else self.e_pool_size
 
             # freeze/control past tasks
             if train:
@@ -411,8 +415,10 @@ class VitHGP(BaseNetwork):
         self,
         model_name: str = "vit_base_patch16_224.augreg_in21k",
         num_classes: int = 100,
-        pretrained: bool = True,
-        prompt_param: list = [100, 8],
+        pretrained: str_to_bool = True,
+        n_prompts: int = 100,
+        prompt_length: int = 8,
+        prompt_pool: str_to_bool = False,
         num_tasks: int = 10,
     ):
         super().__init__()
@@ -434,7 +440,8 @@ class VitHGP(BaseNetwork):
             del load_dict["head.bias"]
         vit_model.load_state_dict(load_dict, strict=False)
         self.last = nn.Linear(768, num_classes)
-        self.prompt = HGPPrompt(768, num_tasks, prompt_param)
+        prompt_param = [n_prompts, prompt_length]
+        self.prompt = HGPPrompt(768, num_tasks, prompt_param, prompt_pool=prompt_pool)
         self.feat = vit_model
 
     def forward(self, x, pen=False, train=True):
@@ -456,3 +463,8 @@ class VitHGP(BaseNetwork):
             return out  # , prompt_loss
         else:
             return out
+
+    def get_params(self, only_trainable=False) -> torch.Tensor:
+        if not only_trainable:
+            return super().get_params()
+        return torch.cat([param.reshape(-1) for param in list(self.last.parameters()) + list(self.prompt.parameters())])

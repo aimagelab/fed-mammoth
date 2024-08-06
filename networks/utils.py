@@ -5,6 +5,7 @@ import torch.nn as nn
 class BaseNetwork(nn.Module):
     def __init__(self) -> None:
         super().__init__()
+        self.embed_dim = 0
 
     def get_params(self) -> torch.Tensor:
         return torch.cat([param.reshape(-1) for param in self.parameters()])

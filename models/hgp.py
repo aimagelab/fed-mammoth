@@ -119,6 +119,9 @@ class HGP(BaseModel):
 
         return loss.item()
 
+    def forward(self, x):  # used in evaluate, while observe is used in training
+        return self.network(x, pen=False, train=False)
+
     def linear_probe(self, dataloader: DataLoader):
         for epoch in range(5):
             for inputs, labels in dataloader:
