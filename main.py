@@ -84,8 +84,11 @@ def main(args: dict, output_folders_root: str, nickname: str) -> None:
     server_model, client_models, dataset = get_artifacts(args, fabric)
 
     if not args["debug_mode"]:
-        with open(os.path.join(output_folder, "config.json"), "w") as f:
-            json.dump(args, f, indent=4)
+        try:
+            with open(os.path.join(output_folder, "config.json"), "w") as f:
+                json.dump(args, f, indent=4)
+        except Exception as e:
+            print(f"Error while saving config: {e}, won't be saving it.")
 
     train(fabric, server_model, client_models, dataset, args, output_folder)
 
