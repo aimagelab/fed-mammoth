@@ -212,7 +212,7 @@ class CCVR(BaseModel):
                 for id, data in enumerate(dataloader):
                     inputs, labels = data
                     inputs, labels = inputs.to(self.device), labels.to(self.device)
-                    outputs = self.network.model.forward_features(inputs)[:, 0]
+                    outputs = self.network(inputs, penultimate=True)[0]
                     features = torch.cat((features, outputs), 0)
                     true_labels = torch.cat((true_labels, labels), 0)
             client_labels = torch.unique(true_labels).tolist()
