@@ -123,31 +123,33 @@ class HGPPrompt(nn.Module):
         e_valid = False
         if l in self.e_layers:
             e_valid = True
-            B, C = x_querry.shape
+            # B, C = x_querry.shape
 
             K = getattr(self, f"e_k_{l}")
             p = getattr(self, f"e_p_{l}")
-            pt = int(self.e_pool_size / (self.n_tasks))
-            s = int(self.task_count * pt) if not self.prompt_pool else 0
-            f = int((self.task_count + 1) * pt) if not self.prompt_pool else self.e_pool_size
+            # pt = int(self.e_pool_size / (self.n_tasks))
+            # s = int(self.task_count * pt) if not self.prompt_pool else 0
+            # f = int((self.task_count + 1) * pt) if not self.prompt_pool else self.e_pool_size
 
-            # freeze/control past tasks
-            if train:
-                if self.task_count > 0:
-                    K = torch.cat((K[:s].detach().clone(), K[s:f]), dim=0)
-                    p = torch.cat((p[:s].detach().clone(), p[s:f]), dim=0)
-                else:
-                    K = K[s:f]
-                    p = p[s:f]
-            else:
-                K = K[0:f]
-                p = p[0:f]
+            # # freeze/control past tasks
+            # if train:
+            #     if self.task_count > 0:
+            #         K = torch.cat((K[:s].detach().clone(), K[s:f]), dim=0)
+            #         p = torch.cat((p[:s].detach().clone(), p[s:f]), dim=0)
+            #     else:
+            #         K = K[s:f]
+            #         p = p[s:f]
+            # else:
+            #     K = K[0:f]
+            #     p = p[0:f]
 
-            # with attention and cosine sim
-            n_K = nn.functional.normalize(K, dim=1)
-            q = nn.functional.normalize(x_querry, dim=1)
-            aq_k = torch.einsum("bd,kd->bk", q, n_K)
-            P_ = torch.einsum("bk,kld->bld", aq_k, p)
+            # # with attention and cosine sim
+            # n_K = nn.functional.normalize(K, dim=1)
+            # q = nn.functional.normalize(x_querry, dim=1)
+            # aq_k = torch.einsum("bd,kd->bk", q, n_K)
+            # P_ = torch.einsum("bk,kld->bld", aq_k, p)
+
+            P_ = p.repeat(x_block.shape[0], 1, 1)
 
             # select prompts
             i = int(self.e_p_length / 2)
@@ -416,8 +418,8 @@ class VitHGP(BaseNetwork):
         model_name: str = "vit_base_patch16_224.augreg_in21k",
         num_classes: int = 100,
         pretrained: str_to_bool = True,
-        n_prompts: int = 100,
-        prompt_length: int = 8,
+        n_prompts: int = 1,
+        prompt_length: int = 200,
         prompt_pool: str_to_bool = False,
         num_tasks: int = 10,
     ):
@@ -448,10 +450,10 @@ class VitHGP(BaseNetwork):
         if x.shape[-1] != 224:
             x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if self.prompt is not None:
-            with torch.no_grad():
-                q, _ = self.feat(x)
-                q = q[:, 0, :]
-            out, prompt_loss = self.feat(x, prompt=self.prompt, q=q, train=train, task_id=-1)
+            # with torch.no_grad():
+            #     q, _ = self.feat(x)
+            #     q = q[:, 0, :]
+            out, prompt_loss = self.feat(x, prompt=self.prompt, q=None, train=train, task_id=-1)
             out = out[:, 0, :]
         else:
             out, _ = self.feat(x)
