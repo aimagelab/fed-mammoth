@@ -63,7 +63,7 @@ def main(args: dict, output_folders_root: str, nickname: str) -> None:
 
     setproctitle.setproctitle(f"{getpass.getuser()}_{nickname}")
 
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
     # command = " ".join(sys.argv)
     output_folder = os.path.join(output_folders_root, f"{timestamp}_{nickname}")
     if not args["debug_mode"]:
