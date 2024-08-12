@@ -122,3 +122,10 @@ class JointCifar100_224(SequentialCifar100_224):
     N_CLASSES_PER_TASK = 100
     N_TASKS = 1
     INPUT_SHAPE = (224, 224, 3)
+
+
+@register_dataset("joint-cifar100_224_hgp")
+class JointCifar100_224_hgp(SequentialCifar100_224_hgp):
+    N_CLASSES_PER_TASK = 100
+    N_TASKS = 1
+    INPUT_SHAPE = (224, 224, 3)

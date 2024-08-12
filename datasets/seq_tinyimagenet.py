@@ -110,7 +110,7 @@ class SequentialTinyImageNet(BaseDataset):
             transforms.Resize(256, interpolation=3),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
-            normalize
+            normalize,
         ]
     )
     INPUT_SHAPE = (224, 224, 3)
@@ -150,3 +150,9 @@ class SequentialTinyImageNet(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+
+@register_dataset("joint-tinyimagenet")
+class JointTinyImageNet(SequentialTinyImageNet):
+    N_CLASSES_PER_TASK = 200
+    N_TASKS = 1
