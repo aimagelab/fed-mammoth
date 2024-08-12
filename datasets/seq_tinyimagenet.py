@@ -94,23 +94,26 @@ class SequentialTinyImageNet(BaseDataset):
     """
     normalize = transforms.Normalize(mean=MEAN, std=STD)
     TRAIN_TRANSFORM = transforms.Compose(
-        # transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
-        # transforms.RandomHorizontalFlip(),
         [
             transforms.ToTensor(),
-            # normalize,
+            transforms.ToPILImage(),
+            transforms.RandomResizedCrop(size=(224, 224), interpolation=3),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
         ]
     )
     TEST_TRANSFORM = transforms.Compose(
-        # transforms.Resize(224, interpolation=3),  # bicubic
-        # transforms.CenterCrop(224),
         [
             transforms.ToTensor(),
-            # normalize,
-        ],
+            transforms.ToPILImage(),
+            transforms.Resize(256, interpolation=3),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize
+        ]
     )
-
-    INPUT_SHAPE = (64, 64, 3)
+    INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,
