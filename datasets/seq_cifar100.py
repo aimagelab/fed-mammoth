@@ -140,8 +140,10 @@ class JointCifar100_224_slca(SequentialCifar100_224):
         transforms.RandomResizedCrop(224, interpolation=3),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(brightness=63 / 255),
+        transforms.ToTensor(),
     ]
     TEST_TRANSFORM = [
         transforms.Resize(256, interpolation=3),
         transforms.CenterCrop(224),
+        transforms.ToTensor(),
     ]
