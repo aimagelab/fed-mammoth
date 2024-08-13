@@ -136,14 +136,18 @@ class JointCifar100_224_slca(SequentialCifar100_224):
     N_CLASSES_PER_TASK = 100
     N_TASKS = 1
     INPUT_SHAPE = (224, 224, 3)
-    TRAIN_TRANSFORM = [
-        transforms.RandomResizedCrop(224, interpolation=3),
-        transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=63 / 255),
-        transforms.ToTensor(),
-    ]
-    TEST_TRANSFORM = [
-        transforms.Resize(256, interpolation=3),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-    ]
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(224, interpolation=3),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=63 / 255),
+            transforms.ToTensor(),
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(256, interpolation=3),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+        ]
+    )
