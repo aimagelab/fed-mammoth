@@ -33,15 +33,18 @@ class RegMean(BaseModel):
         reg_dtype_64: str_to_bool = True,
         slca: str_to_bool = False,
         only_square: int = 0,
-        train_bias: str_to_bool = True,
+        train_bias: str = "all",
     ) -> None:
         self.reg_dtype_64 = reg_dtype_64
         if alpha_regmean_backbone < 0:
             alpha_regmean_backbone = alpha_regmean_head
-        if not train_bias:
+        if "all" not in train_bias:
             for n, p in network.named_parameters():
                 if "bias" in n:
-                    p.requires_grad = False
+                    if "head" not in n:
+                        p.requires_grad = False
+                    elif "head" in n and "head" not in train_bias:
+                        p.requires_grad = False
         if slca:
             backbone_params = []
             head_params = []
