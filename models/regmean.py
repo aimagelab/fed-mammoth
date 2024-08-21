@@ -29,6 +29,7 @@ class RegMean(BaseModel):
         regmean_all: str_to_bool = True,
         alpha_regmean: float = 0.5,
         gram_dtype: str = "32",
+        reg_dtype_64: str_to_bool = True,
         slca: str_to_bool = False,
         only_square: int = 0,
     ) -> None:
@@ -165,6 +166,7 @@ class RegMean(BaseModel):
         else:
             weights = [1 if client["num_train_samples"] > 0 else 0 for client in client_info]
             norm_weights = [w / sum(weights) for w in weights]
+        dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
         # regmean solution
         keys = list(self.network.state_dict().keys())
         sd = self.network.state_dict()
@@ -176,11 +178,11 @@ class RegMean(BaseModel):
                 sd[key] = (
                     torch.stack(
                         [
-                            client["state_dict"][key].to(self.gram_dtype) @ client["grams"][name]
+                            client["state_dict"][key].to(dtype) @ client["grams"][name].to(dtype)
                             for client in client_info
                         ]
                     ).sum(0)
-                    @ torch.pinverse(torch.stack([client["grams"][name] for client in client_info]).sum(0))
+                    @ torch.pinverse(torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0))
                 ).to(torch.float32)
             else:
                 sd[key] = torch.stack(
