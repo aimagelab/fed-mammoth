@@ -64,10 +64,7 @@ class RegMean(BaseModel):
                     and len(list(module.children())) == 0
                     and (
                         (
-                            (
-                                ("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name))
-                                and self.regmean_all
-                            )
+                            (("mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
                             and (
                                 only_square <= 0
                                 or module.state_dict()["weight"].shape[0]
@@ -76,6 +73,7 @@ class RegMean(BaseModel):
                             )
                         )
                         or "head" in name
+                        or "qkv" in name
                     )
                 ):
                     self.gram_modules.append(name)
