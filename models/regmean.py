@@ -33,6 +33,7 @@ class RegMean(BaseModel):
         slca: str_to_bool = False,
         only_square: int = 0,
     ) -> None:
+        self.reg_dtype_64 = reg_dtype_64
         if slca:
             backbone_params = []
             head_params = []
