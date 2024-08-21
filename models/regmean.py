@@ -27,13 +27,17 @@ class RegMean(BaseModel):
         wd_reg: float = 0.1,
         avg_type: str = "weighted",
         regmean_all: str_to_bool = True,
-        alpha_regmean: float = 0.5,
+        alpha_regmean_head: float = 0.5,
+        alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
         slca: str_to_bool = False,
         only_square: int = 0,
     ) -> None:
         self.reg_dtype_64 = reg_dtype_64
+        if alpha_regmean_backbone < 0:
+            alpha_regmean_backbone = alpha_regmean_head
+        self.alpha_regmean = [alpha_regmean_backbone, alpha_regmean_head]
         if slca:
             backbone_params = []
             head_params = []
@@ -119,11 +123,15 @@ class RegMean(BaseModel):
                 #    break
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
+                if "head" in name:
+                    alpha = self.alpha_regmean[1]
+                else:
+                    alpha = self.alpha_regmean[0]
                 self.features[name] = self.features[name].to("cpu")
                 shape = self.features[name].shape[-1]
                 self.gram[name] = (
-                    self.features[name] * self.alpha_regmean
-                    + (1 - self.alpha_regmean) * torch.eye(shape, dtype=self.gram_dtype) * self.features[name]
+                    self.features[name] * alpha
+                    + (1 - alpha) * torch.eye(shape, dtype=self.gram_dtype) * self.features[name]
                 )
                 self.features[name] = torch.tensor([], dtype=self.gram_dtype)
                 hooks[name].remove()
