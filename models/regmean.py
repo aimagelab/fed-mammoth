@@ -37,7 +37,6 @@ class RegMean(BaseModel):
         self.reg_dtype_64 = reg_dtype_64
         if alpha_regmean_backbone < 0:
             alpha_regmean_backbone = alpha_regmean_head
-        self.alpha_regmean = [alpha_regmean_backbone, alpha_regmean_head]
         if slca:
             backbone_params = []
             head_params = []
@@ -53,7 +52,7 @@ class RegMean(BaseModel):
         self.slca = slca
         self.avg_type = avg_type
         self.regmean_all = regmean_all
-        self.alpha_regmean = alpha_regmean
+        self.alpha_regmean = [alpha_regmean_backbone, alpha_regmean_head]
         self.gram_modules = []
         self.middle_names = {}  # conversion from state_dict() names to the names of the modules
         self.gram_dtype = (
