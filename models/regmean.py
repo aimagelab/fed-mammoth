@@ -90,6 +90,7 @@ class RegMean(BaseModel):
                     )
                 ):
                     self.gram_modules.append(name)
+                    self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         else:
             for name, module in self.network.named_modules():
                 if "head" in name and len(list(module.parameters())) > 0 and len(list(module.children())) == 0:

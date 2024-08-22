@@ -54,7 +54,7 @@ def train(
 ) -> None:
 
     if args["wandb"]:
-        name = f"{args['dataset']}_{args['model']}_rnds{args['num_comm_rounds']}_clnts{args['num_clients']}_epchs{args['num_epochs']}_bs{args['batch_size']}_lr{args['lr']}"
+        name = f"{args["nickname"]}_{args['dataset']}_{args['model']}_rnds{args['num_comm_rounds']}_clnts{args['num_clients']}_epchs{args['num_epochs']}_bs{args['batch_size']}_lr{args['lr']}"
         wandb.init(project=args["wandb_project"], entity=args["wandb_entity"], config=args, name=name)
         # args.wandb_url = wandb.run.get_url()
 
@@ -117,7 +117,7 @@ def train(
                         if args["wandb"]:
                             wandb.log({"train_loss": train_loss})
                     model.end_epoch()
-
+                torch.cuda.empty_cache()
                 model.end_round_client(train_loader)
                 model.to("cpu")
                 clients_info.append(model.get_client_info(train_loader))
@@ -133,6 +133,7 @@ def train(
                 "debug_mode"
             ]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
+            torch.cuda.empty_cache()
 
         server_model.end_task()
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))

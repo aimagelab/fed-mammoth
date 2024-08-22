@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     args = parser.parse_known_args()[0]
 
-    args.nickname = str(args.model + "_" + args.dataset + "_" + args.network + "_" + args.nickname)
+    args.nickname = str(args.nickname + "-" + args.model + "_" + args.dataset + "_" + args.network)
 
     add_args(parser, args.model, args.network, args.dataset)
 
