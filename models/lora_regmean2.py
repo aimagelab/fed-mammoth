@@ -18,6 +18,7 @@ import math
 
 @register_model("lora_regmean2")
 class LoraRegMean(Lora, RegMean):
+
     def __init__(
         self,
         fabric,
@@ -32,9 +33,13 @@ class LoraRegMean(Lora, RegMean):
         lora_head: str_to_bool = False,
         cl_merge: str = "individual_mean",
         regmean_all: str_to_bool = True,
-        alpha_regmean: float = 0.5,
+        alpha_regmean_head: float = 0.5,
+        alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
+        slca: str_to_bool = False,
+        only_square: int = 0,
+        train_bias: str = "all",
     ) -> None:
         self.lora_head = False
         self.reg_dtype_64 = reg_dtype_64
@@ -43,7 +48,22 @@ class LoraRegMean(Lora, RegMean):
             self, fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
         )
         RegMean.__init__(
-            self, fabric, network, device, optimizer, lr, wd_reg, avg_type, regmean_all, alpha_regmean, gram_dtype
+            self,
+            fabric,
+            network,
+            device,
+            optimizer,
+            lr,
+            wd_reg,
+            avg_type,
+            regmean_all,
+            alpha_regmean_head,
+            alpha_regmean_backbone,
+            gram_dtype,
+            reg_dtype_64,
+            slca,
+            only_square,
+            train_bias,
         )
         for name in self.gram_modules:
             self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
@@ -83,10 +103,7 @@ class LoraRegMean(Lora, RegMean):
         Lora.begin_round_server(
             self,
         )
-        for key in self.lora_keys:
-            self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
-            self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-            nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+        self.init_matrices()
 
     def set_optimization(self):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))

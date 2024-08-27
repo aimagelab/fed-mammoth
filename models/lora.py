@@ -97,6 +97,15 @@ class Lora(BaseModel):
         self.pre_network = None
         # self.network.eval()
 
+    def init_matrices(self, reverse=False):
+        for key in self.lora_keys:
+            self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
+            self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
+            if not reverse:
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+            else:
+                nn.init.kaiming_uniform_(self.cur_B[key], a=math.sqrt(5))
+
     # used for testing, using a functional_call() to call the network with self.optimization_dict parameters
     def set_optimization(self):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
@@ -202,10 +211,7 @@ class Lora(BaseModel):
                     ) / self.cur_task
             else:
                 raise ValueError("Invalid cl_merge type")
-            for key in self.lora_keys:
-                self.cur_B[key] = nn.Parameter(torch.zeros_like(self.cur_B[key]), requires_grad=True).to(self.device)
-                self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
-                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
+            self.init_matrices()
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
