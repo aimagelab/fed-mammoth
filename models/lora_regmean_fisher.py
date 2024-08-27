@@ -152,9 +152,14 @@ class LoraRegmeanFisher(LoraRegMean):
                 for key in self.lora_keys:
                     if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                         name = self.middle_names[key]
+                        print(f"key: {key}, eps: {eps}")
                         B = torch.stack(
                             [((fish[key].to(dtype) + eps) * B_[key].to(dtype)) for fish, B_ in zip(fishers, cl_B)]
-                        ).sum(0) / (torch.stack([fish[key].to(dtype) + eps for fish in fishers]).sum(0))
+                        ).sum(0) / (torch.stack([(fish[key].to(dtype) + eps) for fish in fishers]).sum(0))
+                        print(f"fishers mins: {[(fishers[i][key].to(dtype) + eps).min() for i in range(len(fishers))]}")
+                        print(
+                            f"B mins: {B.min()}, nans: {B.isnan().sum()}, infs: {B.isinf().sum()} max: {B.max()}, mean: {B.mean()}"
+                        )
                         G = torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
                         E = torch.stack(
                             [
