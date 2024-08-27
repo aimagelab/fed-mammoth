@@ -146,7 +146,7 @@ class LoraRegmeanFisher(LoraRegMean):
             else:
                 self.network.to("cpu")
                 dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
-                eps = 1e-8
+                eps = 5e-7
                 keys = list(self.network.state_dict().keys())
                 # self.fed_weights = {key: None for key in self.lora_keys}
                 for key in self.lora_keys:
