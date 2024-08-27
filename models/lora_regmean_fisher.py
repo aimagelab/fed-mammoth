@@ -34,7 +34,7 @@ class LoraRegmeanFisher(LoraRegMean):
         cl_merge: str = "individual_mean",
         regmean_all: str_to_bool = True,
         alpha_regmean_head: float = 0.5,
-        alpha_regmean_backbone: float = 0.5,
+        alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
         fisher_maxiter: int = -1,
@@ -104,7 +104,7 @@ class LoraRegmeanFisher(LoraRegMean):
             self.cur_A[key].requires_grad = False
         if self.regmean_all:
             fisher = compute_fisher_expectation_fabric(
-                self, dataloader, self.device, self.classes, None, list(self.cur_B.values()), self.fisher_maxiter
+                self, dataloader, self.device, self.classes, self.fabric, list(self.cur_B.values()), self.fisher_maxiter
             ).reshape(-1)
             self.fisher = {}
             counter = 0
