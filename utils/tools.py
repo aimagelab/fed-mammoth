@@ -2,7 +2,7 @@ import torch
 from torch import optim
 from torch.nn import functional as F
 from tqdm import tqdm
-
+from torch.cuda.amp import GradScaler
 
 def str_to_bool(s: str) -> bool:
     return s.lower() in ["true", "1", "t", "y", "yes"]
@@ -32,11 +32,13 @@ def compute_fisher_expectation_fabric(
     else:
         optimizer = optim.SGD(parameters, lr=0.01, momentum=0.9)
         n_par = sum(p.numel() for p in parameters)
-    fish = torch.zeros((n_par,), dtype=torch.float32, requires_grad=False).to(device)
+    fish = torch.zeros((n_par,), dtype=torch.float64, requires_grad=False).to(device)
     network.eval()
     counter = 0
+    use_fabric = (fabric is not None)
     if fabric is not None:
         optimizer = fabric.setup_optimizers(optimizer)
+        #scaler = GradScaler('cuda')
         # data_loader = fabric.setup_dataloaders(data_loader)
     if classes is None:
         classes = []
@@ -51,7 +53,7 @@ def compute_fisher_expectation_fabric(
             break
         images, labels = images.to(device), labels.to(device)
         for image, label in zip(images, labels):
-            out = network(x=image.unsqueeze(0))[0][classes]
+            out = network(x=image.unsqueeze(0), fabric=use_fabric)[0][classes]
             log_probs = F.log_softmax(out)
             probs = F.softmax(out).detach()
             for i, _ in enumerate(classes):
@@ -61,22 +63,26 @@ def compute_fisher_expectation_fabric(
                 if i < last_class:
                     if fabric is not None:
                         fabric.backward(log_prob, retain_graph=True)
+                        #scaler.unscale_(optimizer)
                     else:
                         log_prob.backward(retain_graph=True)
                 else:
                     if fabric is not None:
                         fabric.backward(log_prob)
+                        #scaler.unscale_(optimizer)
                     else:
                         log_prob.backward()
                 # collecting gradients in order to compute Fisher's diagonal
-                grad = torch.tensor([], dtype=torch.float32, requires_grad=False).to(device)
+                grad = torch.tensor([], dtype=torch.float64, requires_grad=False).to(device)
                 if parameters is None:
                     for n, p in network.named_parameters():
-                        grad = torch.cat((grad, p.grad.detach().pow(2).reshape(-1)))
+                        grad_sq = p.grad.detach().to(torch.float64).pow(2).reshape(-1)
+                        grad = torch.cat((grad, grad_sq))
                 else:
                     for p in parameters:
-                        grad = torch.cat((grad, p.grad.detach().pow(2).reshape(-1)))
-                fish += grad * prob
+                        grad_sq = p.grad.detach().to(torch.float64).pow(2).reshape(-1)
+                        grad = torch.cat((grad, grad_sq))
+                fish += grad * prob.to(torch.float64)
         counter += int(labels.shape[0])
 
     fish = fish / counter

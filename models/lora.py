@@ -180,8 +180,11 @@ class Lora(BaseModel):
                     )
             print(f"Number of equal head matrices: {num_equal_head} out of {len(self.head_keys)}")
 
-    def get_optimization_dict(self):
-        optimization_dict = deepcopy(dict(self.network.state_dict()))
+    def get_optimization_dict(self, fabric=True):
+        if fabric:
+            optimization_dict = deepcopy(dict(self.network.state_dict()))
+        else:
+            optimization_dict = deepcopy(dict(self.network.module.state_dict()))
         if not self.lora_head:
             for key in self.head_keys:
                 self.head[key].requires_grad = True
@@ -254,8 +257,10 @@ class Lora(BaseModel):
             self.optimizer.step()
         return loss.item()
 
-    def forward(self, x):
-        return functional_call(self.network, self.optimization_dict, x)
+    def forward(self, x, fabric=True):
+        if fabric:
+            return functional_call(self.network, self.optimization_dict, x)
+        return functional_call(self.network.module, self.optimization_dict, x)
 
     def get_client_info(self, dataloader: DataLoader):
         for key in self.lora_keys:

@@ -88,7 +88,7 @@ class LoraRegmeanFisher(LoraRegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         Lora.end_round_client(self, dataloader)
-        self.set_optimization()
+        self.set_optimization(fabric=True)
         RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
         self.optimization_dict = self.get_optimization_dict()
         if len(self.classes) == 0:
@@ -103,9 +103,13 @@ class LoraRegmeanFisher(LoraRegMean):
             self.cur_B[key].requires_grad = True
             self.cur_A[key].requires_grad = False
         if self.regmean_all:
+            precision = torch.get_float32_matmul_precision()
+            torch.set_float32_matmul_precision("high")
+            self.set_optimization(fabric=False)
             fisher = compute_fisher_expectation_fabric(
-                self, dataloader, self.device, self.classes, self.fabric, list(self.cur_B.values()), self.fisher_maxiter
+                network=self, data_loader=dataloader, device=self.device, classes=self.classes, fabric=None, parameters=list(self.cur_B.values()), maxiter=self.fisher_maxiter
             ).reshape(-1)
+            self.set_optimization(fabric=True)
             self.fisher = {}
             counter = 0
             for key in self.lora_keys:
@@ -113,6 +117,7 @@ class LoraRegmeanFisher(LoraRegMean):
                     fisher[counter : self.cur_B[key].numel() + counter].reshape(self.cur_B[key].shape).to("cpu")
                 )
                 counter += self.cur_B[key].numel()
+            torch.set_float32_matmul_precision(precision)
         else:
             self.fisher = None
 
@@ -215,9 +220,9 @@ class LoraRegmeanFisher(LoraRegMean):
 
             self.set_optimization()
 
-    def set_optimization(self):
+    def set_optimization(self, fabric=True):
         sd = self.network.state_dict()
-        opt_dict = self.get_optimization_dict()
+        opt_dict = self.get_optimization_dict(fabric=fabric)
         if not self.lora_head:
             for key in self.head_keys:
                 opt_dict[key] = sd[key]

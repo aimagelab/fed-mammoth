@@ -71,9 +71,9 @@ class LoraRegMean(Lora, RegMean):
         for key in self.lora_keys:
             self.fed_weights[key] = torch.zeros_like((self.cur_B[key].detach() @ self.cur_A[key].detach()))
 
-    def get_optimization_dict(self):
+    def get_optimization_dict(self, fabric=True):
         opti_dict = Lora.get_optimization_dict(
-            self,
+            self, fabric=fabric
         )
         for key in self.lora_keys:
             opti_dict[key] += self.fed_weights[key]
