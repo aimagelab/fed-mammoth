@@ -219,6 +219,10 @@ class Lora(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_B = deepcopy(server_info["cur_B"])
         self.cur_A = deepcopy(server_info["cur_A"])
+        for key in self.lora_keys:
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.cur_B[key].requires_grad = True
+            self.cur_A[key].requires_grad = True
         self.old_delta = deepcopy(server_info["old_delta"])
         if not self.lora_head:
             self.network.model.head.load_state_dict(server_info["head"])
