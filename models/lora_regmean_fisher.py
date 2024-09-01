@@ -183,7 +183,6 @@ class LoraRegmeanFisher(LoraRegMean):
                         self.cur_B[key] = nn.Parameter(B.detach().clone().to(torch.float32)).to(self.device)
                         self.cur_A[key] = nn.Parameter(A.detach().clone().to(torch.float32)).to(self.device)
                         del B, G, E, A
-                        self.fed_weights[key] = self.cur_B[key] @ self.cur_A[key]
                         # self.fed_weights[key] += (
                         #    torch.stack(
                         #        [
@@ -222,6 +221,8 @@ class LoraRegmeanFisher(LoraRegMean):
             for key in self.lora_keys:
                 self.cur_A[key][self.cur_A[key] < -0.25] = 0
                 self.cur_A[key][self.cur_A[key] > 0.25] = 0
+                # now we can compute the fed_weights
+                self.fed_weights[key] = self.cur_B[key] @ self.cur_A[key]
             self.network.load_state_dict(sd)
 
             self.set_optimization()
