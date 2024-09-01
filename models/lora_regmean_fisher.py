@@ -99,13 +99,13 @@ class LoraRegmeanFisher(LoraRegMean):
                         classes.add(label.item())
             self.classes = list(sorted(classes))
         self.optimizer.zero_grad()
-        for key in self.lora_keys:
-            self.cur_B[key].requires_grad = True
-            self.cur_A[key].requires_grad = False
         if self.regmean_all:
             precision = torch.get_float32_matmul_precision()
             torch.set_float32_matmul_precision("high")
-            self.set_optimization(fabric=False)
+            self.set_optimization_cur_task(fabric=False)
+            for key in self.lora_keys:
+                self.cur_B[key].requires_grad = True
+                self.cur_A[key].requires_grad = False
             fisher = compute_fisher_expectation_fabric(
                 network=self,
                 data_loader=dataloader,
