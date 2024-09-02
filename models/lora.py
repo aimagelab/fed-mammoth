@@ -82,7 +82,9 @@ class Lora(BaseModel):
         self.optimization_dict = {}
         if not self.lora_head:
             self.head = {
-                key: nn.Parameter(torch.tensor(self.network.state_dict()[key]), requires_grad=True).to(self.device)
+                key: nn.Parameter(torch.tensor(self.network.state_dict()[key].clone().detach()), requires_grad=True).to(
+                    self.device
+                )
                 for key in self.head_keys
             }
         self.old_tasks_A = None
