@@ -41,7 +41,9 @@ class LoraRegMeanAlt(LoraRegMean):
         only_square: int = 0,
         train_bias: str = "all",
         train_matrix: str = "alt",
+        fisher_maxiter: int = -1,
     ) -> None:
+        self.fisher_maxiter = fisher_maxiter
         LoraRegMean.__init__(
             self,
             fabric,
@@ -72,9 +74,32 @@ class LoraRegMeanAlt(LoraRegMean):
             self.cur_train_matrix = "B"
         self.cur_round = 0
         self.set_train_matrix()
+        # self.old_delta_fisher = deepcopy(self.old_delta)
+        # self.old_fisher = deepcopy(self.old_delta_fisher)
+        # self.cur_fisher = deepcopy(self.old_delta_fisher)
+
+    def get_optimization_dict(self, fabric=True):
+        opti_dict = Lora.get_optimization_dict(self, fabric=fabric)
+        # for key in self.lora_keys:
+        #    opti_dict[key] += self.fed_weights[key]
+        return opti_dict
 
     def begin_task(self, n_classes_per_task: int):
-        LoraRegMean.begin_task(self, n_classes_per_task)
+        if "fisher" in self.cl_merge and getattr(self, "old_delta_fisher", None) is not None:
+            BaseModel.begin_task(self, n_classes_per_task)
+            for key in self.lora_keys:
+                self.old_delta_fisher[key] = (
+                    (self.old_delta_fisher[key] * self.old_fisher[key])
+                    + ((self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key])
+                ) / (self.old_fisher[key] + self.cur_fisher[key])
+                self.old_fisher[key] += self.cur_fisher[key]
+                # filler in order to test something meaningful after each comm round (not the last one)
+                self.old_delta[key] = (
+                    self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
+                ) / self.cur_task
+            self.init_matrices()
+        else:
+            Lora.begin_task(self, n_classes_per_task)
         self.cur_round = 0
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
@@ -85,6 +110,11 @@ class LoraRegMeanAlt(LoraRegMean):
     def begin_round_server(self):
         self.set_train_matrix()
         self.cur_round += 1
+
+    def end_round_client(self, dataloader: DataLoader):
+        Lora.end_round_client(self, dataloader)
+        self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
 
     def end_round_server(self, client_info: List[dict]):
         with torch.no_grad():
@@ -167,6 +197,105 @@ class LoraRegMeanAlt(LoraRegMean):
         self.set_optimization()
         self.to(self.device)
 
+    def end_task_client(self, dataloader: DataLoader = None):
+        fisher = None
+        if "fisher" in self.cl_merge:
+            classes = set()
+            num_samples = 0
+            for images, labels in dataloader:
+                num_samples += images.shape[0]
+                for label in labels:
+                    if label not in classes:
+                        classes.add(label.item())
+            classes = list(sorted(classes))
+            self.optimizer.zero_grad()
+            if self.regmean_all:
+                precision = torch.get_float32_matmul_precision()
+                # torch.set_float32_matmul_precision("high")
+                # self.detach()
+                # self.set_optimization_cur_task(fabric=False)
+                self.detach()
+                # for key in self.lora_keys:
+                #    self.cur_B[key].requires_grad = True
+                #    self.cur_A[key].requires_grad = True
+                merged_params = {
+                    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
+                    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=True)
+                    for key in self.lora_keys
+                }
+                # adding lora parameters on the network (using .module to get rid of fabric wrapper)
+                self.optimization_dict = deepcopy(dict(self.network.module.state_dict()))
+                for key in self.lora_keys:
+                    self.optimization_dict[key] += merged_params[key]
+                torch.cuda.empty_cache()
+                fisher = compute_fisher_expectation_fabric(
+                    network=self,
+                    data_loader=dataloader,
+                    device=self.device,
+                    classes=classes,
+                    fabric=None,
+                    parameters=list(merged_params.values()),
+                    maxiter=self.fisher_maxiter,
+                ).reshape(-1)
+                self.set_optimization_cur_task(fabric=True)
+                torch.set_float32_matmul_precision(precision)
+            return {"fisher": fisher, "num_samples": num_samples}
+
+    def end_task_server(self, client_info: List[dict] = None):
+        if "fisher" in self.cl_merge:
+            try:
+                getattr(self, "old_delta_fisher")
+            except AttributeError:
+                self.old_delta_fisher = {
+                    key: torch.zeros_like(self.old_delta, requires_grad=False) for key in self.lora_keys
+                }
+            try:
+                getattr(self, "old_fisher")
+            except AttributeError:
+                self.old_fisher = {key: torch.zeros_like(self.old_delta, requires_grad=False) for key in self.lora_keys}
+            fishers = torch.tensor([client_info[i]["fisher"][key] for i in range(len(client_info))])
+            num_samples = torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))]).reshape(-1, 1)
+            avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
+            fisher_dict = {}
+            counter = 0
+            for key in self.lora_keys:
+                merged_params = self.cur_B[key] @ self.cur_A[key]
+                fisher_dict[key] = (
+                    avg_fisher[counter : merged_params.numel() + counter].reshape(merged_params.shape).to("cpu")
+                )
+                counter += merged_params.numel()
+            with torch.no_grad():
+                self.optimization_dict = deepcopy(dict(self.network.state_dict()))
+                for key in self.optimization_dict.keys():
+                    self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                for key in self.lora_keys:
+                    self.old_delta_fisher[key].requires_grad = False
+                    self.cur_B[key].requires_grad = False
+                    self.cur_A[key].requires_grad = False
+                    self.fed_weights[key].requires_grad = False
+                    self.fed_weights[key] = self.fed_weights[key].to(self.device)
+                    self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                    self.old_delta_fisher[key] = self.old_delta[key].to(self.device)
+                    if self.cur_task > 0:
+                        tmp = (self.old_delta_fisher[key] * self.old_fisher[key]) + (
+                            self.fed_weights[key].detach() * fisher_dict[key]
+                        )
+                        self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key])
+                    else:
+                        self.optimization_dict[key] += self.fed_weights[key].detach()
+            try:
+                getattr(self, "cur_fisher")
+            except AttributeError:
+                self.cur_fisher = {key: fisher_dict[key] for key in self.lora_keys}
+
+    def set_optimization_cur_task(self, fabric=True):
+        sd = self.network.state_dict()
+        opt_dict = self.get_optimization_dict(fabric=fabric)
+        if not self.lora_head:
+            for key in self.head_keys:
+                opt_dict[key] = sd[key]
+        self.optimization_dict = opt_dict
+
     def set_optimization(self, fabric=True):
         with torch.no_grad():
             self.optimization_dict = deepcopy(dict(self.network.state_dict()))
@@ -179,6 +308,7 @@ class LoraRegMeanAlt(LoraRegMean):
                 self.fed_weights[key].requires_grad = False
                 self.fed_weights[key] = self.fed_weights[key].to(self.device)
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                self.old_delta[key] = self.old_delta[key].to(self.device)
             if "run_sum" in self.cl_merge:
                 for key in self.lora_keys:
                     if self.cur_task > 0:
@@ -234,3 +364,25 @@ class LoraRegMeanAlt(LoraRegMean):
                     self.cur_A[key] = self.cur_A[key].detach()
                     if not self.cur_B[key].requires_grad:
                         self.cur_B[key].requires_grad = True
+
+    def to(self, device="cpu"):
+        LoraRegMean.to(self, device)
+        if getattr(self, "old_delta_fisher", None) is not None:
+            for key in self.lora_keys:
+                self.old_delta_fisher[key] = self.old_delta_fisher[key].to(device)
+                self.old_fisher[key] = self.old_fisher[key].to(device)
+                self.cur_fisher[key] = self.cur_fisher[key].to(device)
+
+    def detach(self):
+        for key in self.lora_keys:
+            self.cur_A[key] = self.cur_A[key].detach()
+            self.cur_B[key] = self.cur_B[key].detach()
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.fed_weights[key] = self.fed_weights[key].detach()
+        for key in self.head_keys:
+            self.head[key] = self.head[key].detach()
+        if getattr(self, "old_delta_fisher", None) is not None:
+            for key in self.lora_keys:
+                self.old_delta_fisher[key] = self.old_delta_fisher[key].detach()
+                self.old_fisher[key] = self.old_fisher[key].detach()
+                self.cur_fisher[key] = self.cur_fisher[key].detach()

@@ -65,6 +65,12 @@ class LoraRegmeanFisher(LoraRegMean):
         for key in self.lora_keys:
             self.fed_weights[key] = torch.zeros_like(self.cur_B[key] @ self.cur_A[key])
 
+    def get_optimization_dict(self, fabric=True):
+        opti_dict = Lora.get_optimization_dict(self, fabric=fabric)
+        # for key in self.lora_keys:
+        #    opti_dict[key] += self.fed_weights[key]
+        return opti_dict
+
     def begin_task(self, n_classes_per_task: int):
         LoraRegMean.begin_task(self, n_classes_per_task)
         self.init_matrices(reverse=False)

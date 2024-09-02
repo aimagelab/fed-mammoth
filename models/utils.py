@@ -63,8 +63,14 @@ class BaseModel(nn.Module):
         self.cpt = n_classes_per_task
         self.cur_offset = self.cur_task * self.cpt
 
-    def end_task(self):
+    def end_task(self, dataloader: DataLoader = None, info: List[dict] = None):
         pass
+
+    def end_task_client(self, dataloader: DataLoader = None):
+        self.end_task(dataloader=dataloader)
+
+    def end_task_server(self, client_info: List[dict] = None):
+        self.end_task(info=client_info)
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         pass

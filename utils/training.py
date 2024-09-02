@@ -135,7 +135,17 @@ def train(
                 server_model.save_checkpoint(output_folder, task, comm_round)
             torch.cuda.empty_cache()
 
-        server_model.end_task()
+        client_info = []
+        for client_idx in range(args["num_clients"]):
+            train_loader = train_loaders[client_idx]
+            test_loader = test_loaders[client_idx]
+            train_loader = fabric.setup_dataloaders(train_loader)
+            test_loader = fabric.setup_dataloaders(test_loader)
+            model = client_models[client_idx]
+            model.to("cuda")
+            client_info.append(model.end_task_client(train_loader))
+            model.to("cpu")
+        server_model.end_task_server(client_info=client_info)
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
         print("__________\n")
 

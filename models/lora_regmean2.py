@@ -72,15 +72,13 @@ class LoraRegMean(Lora, RegMean):
             self.fed_weights[key] = torch.zeros_like((self.cur_B[key].detach() @ self.cur_A[key].detach()))
 
     def get_optimization_dict(self, fabric=True):
-        opti_dict = Lora.get_optimization_dict(
-            self, fabric=fabric
-        )
+        opti_dict = Lora.get_optimization_dict(self, fabric=fabric)
         for key in self.lora_keys:
             opti_dict[key] += self.fed_weights[key]
         return opti_dict
 
     def begin_task(self, n_classes_per_task: int):
-        super().begin_task(n_classes_per_task)
+        BaseModel.begin_task(self, n_classes_per_task)
         if self.cur_task > 0:
             if self.cl_merge == "run_sum":
                 for key in self.lora_keys:
@@ -94,6 +92,7 @@ class LoraRegMean(Lora, RegMean):
                     self.fed_weights[key] = torch.zeros_like(self.fed_weights[key])
             else:
                 raise ValueError("Invalid cl_merge type")
+            self.init_matrices()
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         Lora.begin_round_client(self, dataloader, server_info)
@@ -104,6 +103,14 @@ class LoraRegMean(Lora, RegMean):
             self,
         )
         self.init_matrices()
+
+    def set_optimization_cur_task(self, fabric=True):
+        sd = self.network.state_dict()
+        opt_dict = self.get_optimization_dict(fabric=fabric)
+        if not self.lora_head:
+            for key in self.head_keys:
+                opt_dict[key] = sd[key]
+        self.optimization_dict = opt_dict
 
     def set_optimization(self):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
@@ -147,7 +154,7 @@ class LoraRegMean(Lora, RegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         Lora.end_round_client(self, dataloader)
-        self.set_optimization()
+        self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
         RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
 
     def get_client_info(self, dataloader: DataLoader):
