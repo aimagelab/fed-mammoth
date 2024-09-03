@@ -110,6 +110,8 @@ class LoraRegMean(Lora, RegMean):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         Lora.begin_round_client(self, dataloader, server_info)
         self.fed_weights = deepcopy(server_info["fed_weights"])
+        self.old_delta = deepcopy(server_info["old_delta"])
+        self.network.model.head.load_state_dict(server_info["head"])
 
     def begin_round_server(self):
         Lora.begin_round_server(
