@@ -110,8 +110,6 @@ class LoraRegMean(Lora, RegMean):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         Lora.begin_round_client(self, dataloader, server_info)
         self.fed_weights = deepcopy(server_info["fed_weights"])
-        self.old_delta = deepcopy(server_info["old_delta"])
-        self.network.model.head.load_state_dict(server_info["head"])
 
     def begin_round_server(self):
         Lora.begin_round_server(
@@ -168,7 +166,8 @@ class LoraRegMean(Lora, RegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         Lora.end_round_client(self, dataloader)
-        self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        # self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        self.set_optimization()
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
         RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks

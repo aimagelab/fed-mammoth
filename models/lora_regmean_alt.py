@@ -132,7 +132,8 @@ class LoraRegMeanAlt(LoraRegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         Lora.end_round_client(self, dataloader)
-        self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        # self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        self.set_optimization()
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
         RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
