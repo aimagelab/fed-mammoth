@@ -263,7 +263,10 @@ class Lora(BaseModel):
             self.fabric.backward(loss)
             # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
             if self.clip_grad:
-                self.fabric.clip_gradients(self.network, self.optimizer, max_norm=1.0, norm_type=2)
+                try:
+                    self.fabric.clip_gradients(self.network, self.optimizer, max_norm=1.0, norm_type=2)
+                except:
+                    pass
             self.optimizer.step()
         return loss.item()
 
