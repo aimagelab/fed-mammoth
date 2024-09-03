@@ -115,6 +115,7 @@ class LoraRegMeanAlt(LoraRegMean):
         Lora.end_round_client(self, dataloader)
         self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
         RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
+        self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
         with torch.no_grad():
@@ -128,74 +129,90 @@ class LoraRegMeanAlt(LoraRegMean):
             cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
             self.to("cpu")
             dtype = torch.float64 if self.reg_dtype_64 else self.gram_dtype
-            eps = 5e-7
-            keys = list(self.network.state_dict().keys())
-            if self.cur_train_matrix == "A":
-                # merge As
-                cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
+            if not self.regmean_all:
+                # fedavg on Lora matrices for all layers except head
                 for key in self.lora_keys:
-                    if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
-                        name = self.middle_names[key]
-                    B = self.cur_B[key].to("cpu").to(dtype)
-                    E = torch.stack(
-                        [
-                            (B_[key].to(dtype) @ A_[key].to(dtype)) @ client["grams"][name].to(dtype)
-                            for B_, A_, client in zip(cl_B, cl_A, client_info)
-                        ]
-                    ).sum(0)
-                    G = torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
-                    A = torch.pinverse(B.T @ B) @ B.T @ E @ torch.pinverse(G)  # A
-                    self.cur_A[key] = A.to(torch.float32)
-            else:
-                # merge Bs
-                cl_B = [client["cur_B"] for client in client_info]  # list of A matrices for all clients
-                for key in self.lora_keys:
-                    if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
-                        name = self.middle_names[key]
-                    A = self.cur_A[key].to("cpu").to(dtype)
-                    E2 = torch.stack(
-                        [
-                            (B_[key].to(dtype) @ A) @ client["grams"][name].to(dtype)
-                            for B_, client in zip(cl_B, client_info)
-                        ]
-                    ).sum(0)
-                    G_inv = torch.pinverse(
-                        A @ torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0) @ A.T
+                    self.cur_B[key] = nn.Parameter(
+                        torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_B, norm_weights)]).sum(
+                            0
+                        )
                     )
-                    B = E2 @ A.T @ G_inv  # B
-                    self.cur_B[key] = B.to(torch.float32)
-                # bt btb eg
-                # eg ata at
-
-        keys = list(self.network.state_dict().keys())
-        sd = self.network.state_dict()
-        for key in keys:
-            # head parameters
-            if "head" in key:
-                if self.middle_names.get(key) is not None and "head" in key:  # regmean on Linear layer
-                    name = self.middle_names[key]
-                    sd[key] = (
-                        torch.stack(
+                    self.cur_A[key] = nn.Parameter(
+                        torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_A, norm_weights)]).sum(
+                            0
+                        )
+                    )
+            else:
+                eps = 5e-7
+                keys = list(self.network.state_dict().keys())
+                if self.cur_train_matrix == "A":
+                    # merge As
+                    cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
+                    for key in self.lora_keys:
+                        if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
+                            name = self.middle_names[key]
+                        B = self.cur_B[key].to("cpu").to(dtype)
+                        E = torch.stack(
                             [
-                                client["state_dict"][key].to(dtype) @ client["grams"][name].to(dtype)
-                                for client in client_info
+                                (B_[key].to(dtype) @ A_[key].to(dtype)) @ client["grams"][name].to(dtype)
+                                for B_, A_, client in zip(cl_B, cl_A, client_info)
                             ]
                         ).sum(0)
-                        @ torch.inverse(torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0))
-                    ).to(torch.float32)
-                else:  # fedavg bias
-                    sd[key] = torch.stack(
-                        [
-                            client["state_dict"][key] * norm_weight
-                            for client, norm_weight in zip(client_info, norm_weights)
-                        ]
-                    ).sum(0)
+                        G = torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
+                        A = torch.pinverse(B.T @ B) @ B.T @ E @ torch.pinverse(G)  # A
+                        self.cur_A[key] = A.to(torch.float32)
+                else:
+                    # merge Bs
+                    cl_B = [client["cur_B"] for client in client_info]  # list of A matrices for all clients
+                    for key in self.lora_keys:
+                        if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
+                            name = self.middle_names[key]
+                        A = self.cur_A[key].to("cpu").to(dtype)
+                        E2 = torch.stack(
+                            [
+                                (B_[key].to(dtype) @ A) @ client["grams"][name].to(dtype)
+                                for B_, client in zip(cl_B, client_info)
+                            ]
+                        ).sum(0)
+                        G_inv = torch.pinverse(
+                            A @ torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0) @ A.T
+                        )
+                        B = E2 @ A.T @ G_inv  # B
+                        self.cur_B[key] = B.to(torch.float32)
+                    # bt btb eg
+                    # eg ata at
+            keys = list(self.network.state_dict().keys())
+            sd = self.network.state_dict()
+            for key in keys:
+                # head parameters
+                if "head" in key:
+                    if self.middle_names.get(key) is not None and "head" in key:  # regmean on Linear layer
+                        name = self.middle_names[key]
+                        sd[key] = (
+                            torch.stack(
+                                [
+                                    client["state_dict"][key].to(dtype) @ client["grams"][name].to(dtype)
+                                    for client in client_info
+                                ]
+                            ).sum(0)
+                            @ torch.inverse(
+                                torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0)
+                            )
+                        ).to(torch.float32)
+                    else:  # fedavg bias
+                        sd[key] = torch.stack(
+                            [
+                                client["state_dict"][key] * norm_weight
+                                for client, norm_weight in zip(client_info, norm_weights)
+                            ]
+                        ).sum(0)
 
-        self.network.load_state_dict(sd)
-        for key in self.lora_keys:
-            self.fed_weights[key] = self.cur_B[key] @ self.cur_A[key]
-        self.set_optimization()
-        self.to(self.device)
+            self.network.load_state_dict(sd)
+            for key in self.lora_keys:
+                self.fed_weights[key] = self.cur_B[key] @ self.cur_A[key]
+            self.detach()
+            self.set_optimization()
+            self.to(self.device)
 
     def end_task_client(self, dataloader: DataLoader = None):
         fisher = None
@@ -302,10 +319,10 @@ class LoraRegMeanAlt(LoraRegMean):
             for key in self.optimization_dict.keys():
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             for key in self.lora_keys:
-                self.old_delta[key].requires_grad = False
-                self.cur_B[key].requires_grad = False
-                self.cur_A[key].requires_grad = False
-                self.fed_weights[key].requires_grad = False
+                self.old_delta[key] = self.old_delta[key].detach()
+                self.cur_B[key] = self.cur_B[key].detach()
+                self.cur_A[key] = self.cur_A[key].detach()
+                self.fed_weights[key] = self.fed_weights[key].detach()
                 self.fed_weights[key] = self.fed_weights[key].to(self.device)
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                 self.old_delta[key] = self.old_delta[key].to(self.device)
@@ -365,13 +382,21 @@ class LoraRegMeanAlt(LoraRegMean):
                     if not self.cur_B[key].requires_grad:
                         self.cur_B[key].requires_grad = True
 
-    def to(self, device="cpu"):
-        LoraRegMean.to(self, device)
-        if getattr(self, "old_delta_fisher", None) is not None:
+    def to(self, device="cpu", only_trainable=True):
+        if only_trainable:
+            self.network = self.network.to(device)
             for key in self.lora_keys:
-                self.old_delta_fisher[key] = self.old_delta_fisher[key].to(device)
-                self.old_fisher[key] = self.old_fisher[key].to(device)
-                self.cur_fisher[key] = self.cur_fisher[key].to(device)
+                self.cur_A[key] = self.cur_A[key].to(device)
+                self.cur_B[key] = self.cur_B[key].to(device)
+            for key in self.head_keys:
+                self.head[key] = self.head[key].to(device)
+        else:
+            LoraRegMean.to(self, device)
+            if getattr(self, "old_delta_fisher", None) is not None:
+                for key in self.lora_keys:
+                    self.old_delta_fisher[key] = self.old_delta_fisher[key].to(device)
+                    self.old_fisher[key] = self.old_fisher[key].to(device)
+                    self.cur_fisher[key] = self.cur_fisher[key].to(device)
 
     def detach(self):
         for key in self.lora_keys:
