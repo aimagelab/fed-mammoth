@@ -149,6 +149,7 @@ class RegMean(BaseModel):
                 x = x.view(-1, x.size(-1))
             tmp = torch.zeros(x.size(-1), x.size(-1), device=self.device, dtype=self.gram_dtype)
             torch.matmul(x.T, x, out=tmp)
+            self.features[name] = self.features[name].to(self.device)
             if len(self.features[name]) == 0:
                 self.features[name] = tmp
             else:
