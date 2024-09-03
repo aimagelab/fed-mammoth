@@ -40,6 +40,7 @@ class Lora(BaseModel):
         device: str,
         optimizer: str = "AdamW",
         lr: float = 3e-4,
+        clip_grad: str_to_bool = False,
         wd_reg: float = 0.1,
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
@@ -56,6 +57,7 @@ class Lora(BaseModel):
         self.lora_params = {}
         self.optimizer_str = optimizer
         self.lr = lr
+        self.clip_grad = clip_grad
         self.wd_reg = wd_reg
         self.lora_head = lora_head
         self.head_keys = []
@@ -260,6 +262,8 @@ class Lora(BaseModel):
         if update:
             self.fabric.backward(loss)
             # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
+            if self.clip_grad:
+                self.fabric.clip_gradients(self.network, self.optimizer, max_norm=1.0, norm_type=2)
             self.optimizer.step()
         return loss.item()
 

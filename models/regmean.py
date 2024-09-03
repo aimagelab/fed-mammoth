@@ -97,7 +97,6 @@ class RegMean(BaseModel):
                     self.gram_modules.append(name)
                     self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         self.features = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
-        self.gram = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -137,11 +136,10 @@ class RegMean(BaseModel):
                     alpha = self.alpha_regmean[0]
                 self.features[name] = self.features[name].to("cpu")
                 shape = self.features[name].shape[-1]
-                self.gram[name] = (
+                self.features[name] = (
                     self.features[name] * alpha
                     + (1 - alpha) * torch.eye(shape, dtype=self.gram_dtype) * self.features[name]
                 )
-                self.features[name] = torch.tensor([], dtype=self.gram_dtype)
                 hooks[name].remove()
 
     def hook_handler(self, name):
@@ -163,14 +161,13 @@ class RegMean(BaseModel):
         if client_info is None:
             client_info = {}
         client_info["state_dict"] = deepcopy(self.network.state_dict())
-        client_info["grams"] = deepcopy(self.gram)
+        client_info["grams"] = deepcopy(self.features)
         client_info["num_train_samples"] = len(dataloader.dataset.data)
         return client_info
 
     def to(self, device="cpu"):
         self.network.to(device)
         for name in self.gram_modules:
-            self.gram[name] = self.gram[name].to(device)
             self.features[name] = self.features[name].to(device)
 
     def get_server_info(self):

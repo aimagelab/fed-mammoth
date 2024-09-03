@@ -26,6 +26,7 @@ class LoraRegMean(Lora, RegMean):
         device: str,
         optimizer: str = "AdamW",
         lr: float = 3e-4,
+        clip_grad: str_to_bool = False,
         wd_reg: float = 0.1,
         avg_type: str = "weighted",
         lora_alpha: float = 1.0,
@@ -45,7 +46,19 @@ class LoraRegMean(Lora, RegMean):
         self.reg_dtype_64 = reg_dtype_64
         self.middle_names = {}  # conversion from state_dict() names to the names of the modules
         Lora.__init__(
-            self, fabric, network, device, optimizer, lr, wd_reg, avg_type, lora_alpha, r, lora_head, cl_merge
+            self,
+            fabric,
+            network,
+            device,
+            optimizer,
+            lr,
+            clip_grad,
+            wd_reg,
+            avg_type,
+            lora_alpha,
+            r,
+            lora_head,
+            cl_merge,
         )
         RegMean.__init__(
             self,
@@ -143,7 +156,6 @@ class LoraRegMean(Lora, RegMean):
                         self.optimization_dict[key] += tmp
                     else:
                         self.optimization_dict[key] += self.fed_weights[key]
-
             elif "mean" in self.cl_merge:
                 for key in self.lora_keys:
                     if self.cur_task > 0:
@@ -159,7 +171,7 @@ class LoraRegMean(Lora, RegMean):
 
     def get_client_info(self, dataloader: DataLoader):
         client_info = Lora.get_client_info(self, dataloader)
-        client_info["grams"] = deepcopy(self.gram)
+        client_info["grams"] = deepcopy(self.features)
         client_info["state_dict"] = deepcopy(self.network.state_dict())
         return client_info
 
