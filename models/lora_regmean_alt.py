@@ -123,6 +123,7 @@ class LoraRegMeanAlt(LoraRegMean):
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         LoraRegMean.begin_round_client(self, dataloader, server_info)
+        self.fed_weights = {key: torch.zeros_like(self.fed_weights[key]) for key in self.lora_keys}
         self.set_train_matrix()
         self.cur_round += 1
 
@@ -131,12 +132,7 @@ class LoraRegMeanAlt(LoraRegMean):
         self.cur_round += 1
 
     def end_round_client(self, dataloader: DataLoader):
-        Lora.end_round_client(self, dataloader)
-        # self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
-        self.set_optimization()
-        for name in self.gram_modules:
-            self.features[name] = self.features[name].to(self.device)
-        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
+        LoraRegMean.end_round_client(self, dataloader)
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):

@@ -114,6 +114,8 @@ class RegMean(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         sd = server_info["state_dict"]
         self.network.load_state_dict(sd)
+        for name in self.gram_modules:
+            self.features[name] = torch.tensor([], dtype=self.gram_dtype)
 
     def end_round_client(self, dataloader: DataLoader):
         hooks = {name: None for name in self.gram_modules}

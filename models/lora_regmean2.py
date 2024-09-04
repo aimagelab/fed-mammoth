@@ -110,6 +110,9 @@ class LoraRegMean(Lora, RegMean):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         Lora.begin_round_client(self, dataloader, server_info)
         self.fed_weights = deepcopy(server_info["fed_weights"])
+        # Regmean already does it, but also mounts the state dict, which is already done by LoRA
+        for name in self.gram_modules:
+            self.features[name] = torch.tensor([], dtype=self.gram_dtype)
 
     def begin_round_server(self):
         Lora.begin_round_server(
@@ -167,6 +170,9 @@ class LoraRegMean(Lora, RegMean):
     def end_round_client(self, dataloader: DataLoader):
         Lora.end_round_client(self, dataloader)
         # self.set_optimization_cur_task(fabric=True)  # loading current task parameters only to compute the Gram matrices
+        # setting up the parameters to correctly compute the Gram matrices for the next round
+        for key in self.lora_keys:
+            self.fed_weights[key] = self.cur_B[key] @ self.cur_A[key]
         self.set_optimization()
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
