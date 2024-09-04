@@ -133,10 +133,10 @@ class LoraRegMean(Lora, RegMean):
         for key in self.optimization_dict.keys():
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
         for key in self.lora_keys:
-            self.old_delta[key].requires_grad = False
-            self.cur_B[key].requires_grad = False
-            self.cur_A[key].requires_grad = False
-            self.fed_weights[key].requires_grad = False
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.cur_B[key] = self.cur_B[key].detach()
+            self.cur_A[key] = self.cur_A[key].detach()
+            self.fed_weights[key] = self.fed_weights[key].detach()
             self.fed_weights[key] = self.fed_weights[key].to(self.device)
             self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
         if "run_sum" in self.cl_merge:
