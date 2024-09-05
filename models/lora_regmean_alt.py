@@ -298,8 +298,9 @@ class LoraRegMeanAlt(LoraRegMean):
                 )
                 eps = 1e-7
                 avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
-                avg_fisher = avg_fisher.to(self.device)
+                # avg_fisher = avg_fisher.to(self.device)
                 del fishers
+                self.to("cpu")
                 torch.cuda.empty_cache()
                 fisher_dict = {}
                 counter = 0
@@ -318,10 +319,10 @@ class LoraRegMeanAlt(LoraRegMean):
                         self.cur_B[key].requires_grad = False
                         self.cur_A[key].requires_grad = False
                         self.fed_weights[key].requires_grad = False
-                        self.fed_weights[key] = self.fed_weights[key].to(self.device)
-                        self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
-                        self.old_delta_fisher[key] = self.old_delta[key].to(self.device)
-                        self.old_fisher[key] = self.old_fisher[key].to(self.device)
+                        # self.fed_weights[key] = self.fed_weights[key].to(self.device)
+                        # self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                        # self.old_delta_fisher[key] = self.old_delta[key].to(self.device)
+                        # self.old_fisher[key] = self.old_fisher[key].to(self.device)
                         if self.cur_task > 0:
                             tmp = self.old_delta_fisher[key] + (self.fed_weights[key].detach() * fisher_dict[key]) + eps
                             self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key] + eps)
