@@ -275,6 +275,7 @@ class LoraRegMeanAlt(LoraRegMean):
                 ).reshape(-1)
                 # self.set_optimization_cur_task(fabric=True)
                 torch.set_float32_matmul_precision(precision)
+                fisher = fisher.to("cpu")
             return {"fisher": fisher, "num_samples": num_samples}
 
     def end_task_server(self, client_info: List[dict] = None):
@@ -299,6 +300,7 @@ class LoraRegMeanAlt(LoraRegMean):
                     .to(self.device)
                 )
                 avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
+                avg_fisher = avg_fisher.to(self.device)
                 del fishers
                 torch.cuda.empty_cache()
                 fisher_dict = {}
