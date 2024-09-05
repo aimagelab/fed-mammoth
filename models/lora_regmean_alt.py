@@ -312,8 +312,8 @@ class LoraRegMeanAlt(LoraRegMean):
                     counter += merged_params.numel()
                 with torch.no_grad():
                     self.optimization_dict = deepcopy(dict(self.network.state_dict()))
-                    for key in self.optimization_dict.keys():
-                        self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
+                    # for key in self.optimization_dict.keys():
+                    #    self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                     for key in self.lora_keys:
                         self.old_delta_fisher[key].requires_grad = False
                         self.cur_B[key].requires_grad = False
@@ -328,6 +328,8 @@ class LoraRegMeanAlt(LoraRegMean):
                             self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key] + eps)
                         else:
                             self.optimization_dict[key] += self.fed_weights[key].detach()
+                    for key in self.network.state_dict().keys():
+                        self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                 try:
                     getattr(self, "cur_fisher")
                 except AttributeError:
@@ -336,7 +338,7 @@ class LoraRegMeanAlt(LoraRegMean):
                     for key in self.lora_keys:
                         self.cur_fisher[key] = fisher_dict[key]
                 del fisher_dict
-            self.to("cpu")
+            # self.to("cpu")
 
     def set_optimization_cur_task(self, fabric=True):
         self.detach()
