@@ -458,5 +458,9 @@ class LoraRegMeanAlt(LoraRegMean):
         if getattr(self, "old_delta_fisher", None) is not None:
             for key in self.lora_keys:
                 self.old_delta_fisher[key] = self.old_delta_fisher[key].detach()
+        if getattr(self, "old_fisher", None) is not None:
+            for key in self.lora_keys:
                 self.old_fisher[key] = self.old_fisher[key].detach()
+        if getattr(self, "cur_fisher", None) is not None:
+            for key in self.lora_keys:
                 self.cur_fisher[key] = self.cur_fisher[key].detach()
