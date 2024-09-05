@@ -439,7 +439,11 @@ class LoraRegMeanAlt(LoraRegMean):
             if getattr(self, "old_delta_fisher", None) is not None:
                 for key in self.lora_keys:
                     self.old_delta_fisher[key] = self.old_delta_fisher[key].to(device)
+            if getattr(self, "old_fisher", None) is not None:
+                for key in self.lora_keys:
                     self.old_fisher[key] = self.old_fisher[key].to(device)
+            if getattr(self, "cur_fisher", None) is not None:
+                for key in self.lora_keys:
                     self.cur_fisher[key] = self.cur_fisher[key].to(device)
         else:  # we move only the trainable parameters to the device
             self.network = self.network.to(device)
