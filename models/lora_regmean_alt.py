@@ -101,6 +101,7 @@ class LoraRegMeanAlt(LoraRegMean):
     def begin_task(self, n_classes_per_task: int):
         BaseModel.begin_task(self, n_classes_per_task)
         if "fisher" in self.cl_merge and getattr(self, "old_delta_fisher", None) is not None:
+            self.to("cpu")
             for key in self.lora_keys:
                 self.old_delta_fisher[key] = self.old_delta_fisher[key] + (
                     (self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key]
@@ -110,6 +111,7 @@ class LoraRegMeanAlt(LoraRegMean):
                 self.old_delta[key] = (
                     self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                 ) / self.cur_task
+            self.to(self.device)
             self.init_matrices()
         else:
             if self.cur_task > 0:
