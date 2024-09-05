@@ -102,10 +102,9 @@ class LoraRegMeanAlt(LoraRegMean):
         BaseModel.begin_task(self, n_classes_per_task)
         if "fisher" in self.cl_merge and getattr(self, "old_delta_fisher", None) is not None:
             for key in self.lora_keys:
-                self.old_delta_fisher[key] = (
-                    (self.old_delta_fisher[key] * self.old_fisher[key])
-                    + ((self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key])
-                ) / (self.old_fisher[key] + self.cur_fisher[key])
+                self.old_delta_fisher[key] = self.old_delta_fisher[key] + (
+                    (self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key]
+                )
                 self.old_fisher[key] += self.cur_fisher[key]
                 # filler in order to test something meaningful after each comm round (not the last one)
                 self.old_delta[key] = (
@@ -294,11 +293,10 @@ class LoraRegMeanAlt(LoraRegMean):
                         key: torch.zeros_like(self.old_delta[key], requires_grad=False) for key in self.lora_keys
                     }
                 fishers = torch.stack([client_info[i]["fisher"] for i in range(len(client_info))])
-                num_samples = (
-                    torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))])
-                    .reshape(-1, 1)
-                    .to(self.device)
+                num_samples = torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))]).reshape(
+                    -1, 1
                 )
+                eps = 1e-7
                 avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
                 avg_fisher = avg_fisher.to(self.device)
                 del fishers
@@ -325,10 +323,8 @@ class LoraRegMeanAlt(LoraRegMean):
                         self.old_delta_fisher[key] = self.old_delta[key].to(self.device)
                         self.old_fisher[key] = self.old_fisher[key].to(self.device)
                         if self.cur_task > 0:
-                            tmp = (self.old_delta_fisher[key] * self.old_fisher[key]) + (
-                                self.fed_weights[key].detach() * fisher_dict[key]
-                            )
-                            self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key])
+                            tmp = self.old_delta_fisher[key] + (self.fed_weights[key].detach() * fisher_dict[key]) + eps
+                            self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key] + eps)
                         else:
                             self.optimization_dict[key] += self.fed_weights[key].detach()
                 try:
