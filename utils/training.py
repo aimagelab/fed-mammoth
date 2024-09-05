@@ -148,8 +148,8 @@ def train(
             torch.cuda.empty_cache()
         server_model.end_task_server(client_info=client_info)
         server_model.to("cuda")
-        accuracy = evaluate(fabric, task, server_model, dataset)
         torch.cuda.empty_cache()
+        accuracy = evaluate(fabric, task, server_model, dataset)
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
         print("__________\n")
 

@@ -321,6 +321,7 @@ class LoraRegMeanAlt(LoraRegMean):
                         self.fed_weights[key] = self.fed_weights[key].to(self.device)
                         self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
                         self.old_delta_fisher[key] = self.old_delta[key].to(self.device)
+                        self.old_fisher[key] = self.old_fisher[key].to(self.device)
                         if self.cur_task > 0:
                             tmp = (self.old_delta_fisher[key] * self.old_fisher[key]) + (
                                 self.fed_weights[key].detach() * fisher_dict[key]
@@ -336,6 +337,7 @@ class LoraRegMeanAlt(LoraRegMean):
                     for key in self.lora_keys:
                         self.cur_fisher[key] = fisher_dict[key]
                 del fisher_dict
+            self.to("cpu")
 
     def set_optimization_cur_task(self, fabric=True):
         self.detach()

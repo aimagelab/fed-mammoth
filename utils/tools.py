@@ -75,15 +75,19 @@ def compute_fisher_expectation_fabric(
                         log_prob.backward()
                 # collecting gradients in order to compute Fisher's diagonal
                 grad = torch.tensor([], dtype=torch.float32, requires_grad=False).to(device)
+                grad_list = []
                 if parameters is None:
                     for n, p in network.named_parameters():
-                        grad_sq = p.grad.detach().to(torch.float32).pow(2).reshape(-1)
-                        grad = torch.cat((grad, grad_sq))
+                        grad_list.append(p.grad.detach().to(torch.float32).pow(2).reshape(-1))
+                        # grad = torch.cat((grad, grad_sq))
                 else:
                     for p in parameters:
-                        grad_sq = p.grad.detach().to(torch.float32).pow(2).reshape(-1)
-                        grad = torch.cat((grad, grad_sq))
+                        # grad = torch.cat((grad, p.grad.detach().to(torch.float32).pow(2).reshape(-1)))
+                        grad_list.append(p.grad.detach().to(torch.float32).pow(2).reshape(-1))
+                grad = torch.cat(grad_list)
                 fish += grad * prob.to(torch.float32)
+                del grad_list, grad
+                torch.cuda.empty_cache()
         counter += int(labels.shape[0])
 
     fish = fish / counter
