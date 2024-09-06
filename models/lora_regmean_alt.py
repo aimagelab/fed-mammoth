@@ -232,6 +232,21 @@ class LoraRegMeanAlt(LoraRegMean):
             self.detach()
             self.set_optimization()
             self.to(self.device)
+    def get_client_info(self, dataloader: DataLoader):
+        for key in self.lora_keys:
+            self.old_delta[key] = self.old_delta[key].detach()
+            self.cur_B[key] = self.cur_B[key].detach()
+            self.cur_A[key] = self.cur_A[key].detach()
+        client_info = {
+            "cur_A": self.cur_A,
+            "cur_B": self.cur_B,
+            "num_train_samples": len(dataloader.dataset.data),
+        }
+        if not self.lora_head:
+            client_info["head"] = self.network.model.head.state_dict()
+        client_info["grams"] = self.features
+        client_info["state_dict"] = self.network.state_dict()
+        return client_info
 
     def end_task_client(self, dataloader: DataLoader = None):
         fisher = None
@@ -298,7 +313,7 @@ class LoraRegMeanAlt(LoraRegMean):
                 num_samples = torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))]).reshape(
                     -1, 1
                 )
-                eps = 1e-7
+                eps = 1e-12
                 avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
                 # avg_fisher = avg_fisher.to(self.device)
                 del fishers
