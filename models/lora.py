@@ -291,14 +291,16 @@ class Lora(BaseModel):
 
     def get_server_info(self):
         for key in self.lora_keys:
-            self.old_delta[key] = self.old_delta[key].detach()
             self.cur_B[key] = self.cur_B[key].detach()
             self.cur_A[key] = self.cur_A[key].detach()
         server_info = {
             "cur_A": deepcopy(self.cur_A),
             "cur_B": deepcopy(self.cur_B),
-            "old_delta": deepcopy(self.old_delta),
         }
+        if getattr(self, "old_delta", None) is not None:
+            for key in self.lora_keys:
+                self.old_delta[key] = self.old_delta[key].detach()
+            server_info["old_delta"] = self.old_delta
         if not self.lora_head:
             server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info

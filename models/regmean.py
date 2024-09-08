@@ -31,7 +31,7 @@ class RegMean(BaseModel):
         alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
-        slca: str_to_bool = False,
+        lr_back: float = -1,
         only_square: int = 0,
         train_bias: str = "all",
     ) -> None:
@@ -45,19 +45,13 @@ class RegMean(BaseModel):
                         p.requires_grad = False
                     elif "head" in n and "head" not in train_bias:
                         p.requires_grad = False
-        if slca:
-            backbone_params = []
-            head_params = []
-            for n, p in network.named_parameters():
-                if "head" in n:
-                    head_params.append(p)
-                else:
-                    backbone_params.append(p)
-            params = [{"params": backbone_params, "lr": lr / 100}, {"params": head_params}]
+        if lr_back > 0:
+            backbone_params, head_params = self.split_backbone_head()
+            params = [{"params": backbone_params, "lr": lr_back}, {"params": head_params}]
             super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
         else:
             super(RegMean, self).__init__(fabric, network, device, optimizer, lr, wd_reg)
-        self.slca = slca
+        self.lr_back = lr_back
         self.avg_type = avg_type
         self.regmean_all = regmean_all
         self.alpha_regmean = [alpha_regmean_backbone, alpha_regmean_head]
@@ -97,6 +91,16 @@ class RegMean(BaseModel):
                     self.gram_modules.append(name)
                     self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         self.features = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
+
+    def split_backbone_head(self):
+        backbone_params = []
+        head_params = []
+        for n, p in self.network.named_parameters():
+            if "head" in n:
+                head_params.append(p)
+            else:
+                backbone_params.append(p)
+        return backbone_params, head_params
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()

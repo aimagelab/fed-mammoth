@@ -136,6 +136,7 @@ def train(
             torch.cuda.empty_cache()
 
         client_info = []
+        server_info = server_model.get_server_info()
         for client_idx in range(args["num_clients"]):
             train_loader = train_loaders[client_idx]
             test_loader = test_loaders[client_idx]
@@ -143,7 +144,7 @@ def train(
             test_loader = fabric.setup_dataloaders(test_loader)
             model = client_models[client_idx]
             model.to("cuda")
-            client_info.append(model.end_task_client(train_loader))
+            client_info.append(model.end_task_client(train_loader, server_info))
             model.to("cpu")
             torch.cuda.empty_cache()
         server_model.end_task_server(client_info=client_info)
