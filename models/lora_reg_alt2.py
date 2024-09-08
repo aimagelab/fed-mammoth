@@ -173,6 +173,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
         self.set_train_matrix()
         self.cur_round += 1
+        for name in self.gram_modules:
+            self.features[name] = torch.tensor([], dtype=self.gram_dtype)
 
     def begin_round_server(self):
         if getattr(self, "old_delta", None) is None:
