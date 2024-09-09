@@ -332,7 +332,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                         )
                     )
             else:
-                eps = 5e-7
+                #eps = 5e-7
                 keys = list(self.network.state_dict().keys())
                 if self.cur_train_matrix == "A":
                     # merge As
@@ -529,8 +529,9 @@ class LoraRegMeanAlt(Lora, RegMean):
                 num_samples = torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))]).reshape(
                     -1, 1
                 )
-                eps = 1e-12
+                eps = 1e-20
                 avg_fisher = fishers.sum(0) / num_samples.sum()
+                avg_fisher += eps
                 # avg_fisher = avg_fisher.to(self.device)
                 del fishers
                 self.to("cpu")
@@ -553,8 +554,8 @@ class LoraRegMeanAlt(Lora, RegMean):
                         self.cur_B[key].requires_grad = False
                         self.cur_A[key].requires_grad = False
                         if self.cur_task > 0:
-                            tmp = self.old_delta_fisher[key] + (merged_params[key].detach() * fisher_dict[key]) + eps
-                            self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key] + eps)
+                            tmp = self.old_delta_fisher[key] + (merged_params[key].detach() * fisher_dict[key])
+                            self.optimization_dict[key] += tmp / (self.old_fisher[key] + fisher_dict[key])
                         else:
                             self.optimization_dict[key] += merged_params[key].detach()
                     for key in self.network.state_dict().keys():
