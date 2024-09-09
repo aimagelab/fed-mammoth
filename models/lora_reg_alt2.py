@@ -530,7 +530,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                     -1, 1
                 )
                 eps = 1e-12
-                avg_fisher = (fishers * num_samples).sum(0) / num_samples.sum()
+                avg_fisher = fishers.sum(0) / num_samples.sum()
                 # avg_fisher = avg_fisher.to(self.device)
                 del fishers
                 self.to("cpu")
