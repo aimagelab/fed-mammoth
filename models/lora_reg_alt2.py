@@ -459,6 +459,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         fisher = None
         self.cur_B = deepcopy(server_info["cur_B"])
         self.cur_A = deepcopy(server_info["cur_A"])
+        self.network.model.head.load_state_dict(server_info["head"])
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
         if "fisher" in self.cl_merge:
