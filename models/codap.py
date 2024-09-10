@@ -6,7 +6,7 @@ from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
-from networks.vit_prompt_coda import VitZoo
+from networks.vit_prompt_coda import ViTZoo
 import os
 from utils.tools import str_to_bool
 import math
@@ -72,12 +72,12 @@ class CosineSchedule(_LRScheduler):
         return [self.cosine(base_lr) for base_lr in self.base_lrs]
 
 
-@register_model("hgp")
+@register_model("coda_prompt")
 class HGP(BaseModel):
     def __init__(
         self,
         fabric,
-        network: VitZoo,
+        network: ViTZoo,
         device: str,
         optimizer: str = "AdamW",
         lr: float = 1e-3,
