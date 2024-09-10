@@ -38,7 +38,7 @@ class LoraRegMean(Lora, RegMean):
         alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
-        slca: str_to_bool = False,
+        lr_back: float = -1,
         only_square: int = 0,
         train_bias: str = "all",
     ) -> None:
@@ -74,7 +74,7 @@ class LoraRegMean(Lora, RegMean):
             alpha_regmean_backbone,
             gram_dtype,
             reg_dtype_64,
-            slca,
+            lr_back,
             only_square,
             train_bias,
         )
@@ -188,8 +188,8 @@ class LoraRegMean(Lora, RegMean):
         server_info = Lora.get_server_info(
             self,
         )
-        server_info["old_delta"] = deepcopy(self.old_delta)
-        server_info["fed_weights"] = deepcopy(self.fed_weights)
+        if getattr(self, "fed_weights", None) is not None:
+            server_info["fed_weights"] = self.fed_weights
         server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info
 
