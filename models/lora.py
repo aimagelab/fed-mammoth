@@ -275,6 +275,9 @@ class Lora(BaseModel):
             return functional_call(self.network, self.optimization_dict, x)
         return functional_call(self.network.module, self.optimization_dict, x)
 
+    def forward_2(self, x):
+        return self.network.module(x)
+
     def get_client_info(self, dataloader: DataLoader):
         for key in self.lora_keys:
             self.old_delta[key] = self.old_delta[key].detach()

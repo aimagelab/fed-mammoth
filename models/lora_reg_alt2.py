@@ -124,7 +124,7 @@ class LoraRegMeanAlt(Lora, RegMean):
 
 
     def __compute_fisher_hooks(self, modules, param_resolution_dict,
-                    dataloader, debug_mode: bool=False):
+                    dataloader, debug_mode: bool=False, forward = 1):
         """
         all_param_lored is the list of all the parameters that are lored, so net + lora
         """
@@ -181,11 +181,14 @@ class LoraRegMeanAlt(Lora, RegMean):
         num_of_examples = 0
         fake_param = torch.tensor([1.], requires_grad=True).to(self.device)
         for j, (examples, _) in enumerate(tqdm(dataloader, total=len(dataloader), desc='FISHER computation')):
-            if j > self.fisher_maxiter and self.fisher_maxiter > 0:
+            if j >= self.fisher_maxiter and self.fisher_maxiter > 0:
                 break
             examples = examples.to(self.device)
             num_of_examples += examples.shape[0]
-            probs = torch.softmax(self.forward(examples * fake_param, fabric=False)[:, self.cur_offset : self.cur_offset + self.cpt], dim=1)
+            if forward == 1:
+                probs = torch.softmax(self.forward(examples * fake_param, fabric=False)[:, self.cur_offset : self.cur_offset + self.cpt], dim=1)
+            else:
+                probs = torch.softmax(self.forward_2(examples * fake_param)[:, self.cur_offset : self.cur_offset + self.cpt], dim=1)
             detached_probs = probs.detach()
             log_probs = torch.log(probs)
             fisher_sqrt = (detached_probs.sqrt() * log_probs).sum(0)
@@ -292,6 +295,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round += 1
 
     def end_round_client(self, dataloader: DataLoader):
+        self.optimizer.zero_grad()
+        self.optimizer = None
         Lora.end_round_client(self, dataloader)
         # setting up the parameters to correctly compute the Gram matrices for the next round
         self.set_optimization()
@@ -340,7 +345,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                     for key in self.lora_keys:
                         if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                             name = self.middle_names[key]
-                        #print(key)
+                        print(key)
                         for i in range(len(cl_A)):
                             cl_A[i][key] = cl_A[i][key].to(self.device).to(dtype)
                             client_info[i]["grams"][name] = client_info[i]["grams"][name].to(self.device).to(dtype)
@@ -364,11 +369,12 @@ class LoraRegMeanAlt(Lora, RegMean):
                     
                 else:
                     # merge Bs
+                    print("Merging Bs")
                     cl_B = [client["cur_B"] for client in client_info]  # list of A matrices for all clients
                     for key in self.lora_keys:
                         if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                             name = self.middle_names[key]
-                        #print(key)
+                        print(key)
                         for i in range(len(cl_B)):
                             cl_B[i][key] = cl_B[i][key].to(self.device).to(dtype)
                             client_info[i]["grams"][name] = client_info[i]["grams"][name].to(self.device).to(dtype)
@@ -390,8 +396,8 @@ class LoraRegMeanAlt(Lora, RegMean):
                         del E2, G_inv, A, B
                         #gc.collect()
                         #print(f"reserved memory: {torch.cuda.memory_reserved()}\tallocated memory: {torch.cuda.memory_allocated()}")
-                        #if torch.cuda.memory_reserved() / total_mem > 0.8:
-                        #    torch.cuda.empty_cache()
+                        if torch.cuda.memory_reserved() / total_mem > 0.8:
+                            torch.cuda.empty_cache()
                         #    print(f"reserved memory: {torch.cuda.memory_reserved()}\tallocated memory: {torch.cuda.memory_allocated()}")
                     # bt btb eg
                     # eg ata at
@@ -471,10 +477,21 @@ class LoraRegMeanAlt(Lora, RegMean):
             #        if label not in classes:
             #            classes.add(label.item())
             #classes = list(sorted(classes))
-            self.optimizer.zero_grad()
+            #if self.lr_back > 0:
+            #    backbone_params, head_params = self.split_backbone_head()
+            #    params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}]
+            #else:
+            #    if not self.lora_head:
+            #        params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
+            #    else:
+            #        params = list(self.cur_B.values()) + list(self.cur_A.values())
+            #OptimizerClass = getattr(torch.optim, self.optimizer_str)
+            #self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
+            #self.optimizer = self.fabric.setup_optimizers(self.optimizer)
+            #self.optimizer.zero_grad()
             if self.regmean_all:
                 precision = torch.get_float32_matmul_precision()
-                # torch.set_float32_matmul_precision("high")
+                torch.set_float32_matmul_precision("high")
                 # self.detach()
                 self.detach()
                 # for key in self.lora_keys:
@@ -486,27 +503,56 @@ class LoraRegMeanAlt(Lora, RegMean):
                 #    for key in self.lora_keys
                 #}
                 merged_params = {
-                    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
+                #    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
                     key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=False)
                     for key in self.lora_keys
                 }
                 # adding lora parameters on the network (using .module to get rid of fabric wrapper)
+                torch.cuda.empty_cache()
+                #merged_params = {
+                #    #key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
+                #    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=True)
+                #    for key in self.lora_keys
+                #}
                 self.optimization_dict = deepcopy(dict(self.network.module.state_dict()))
                 for key in self.lora_keys:
                     self.optimization_dict[key] += merged_params[key]
-                torch.cuda.empty_cache()
                 #fisher = compute_fisher_expectation_fabric(
                 #    network=self,
                 #    data_loader=dataloader,
                 #    device=self.device,
-                #    classes=classes,
+                #    classes=list(set(range(self.cur_offset, self.cur_offset + self.cpt))),
                 #    fabric=None,
                 #    parameters=list(merged_params.values()),
                 #    maxiter=self.fisher_maxiter,
                 #).reshape(-1)
+                merged_params = {
+                    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
+                    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=False)
+                    for key in self.lora_keys
+                }
+                for key in self.lora_keys:
+                    self.optimization_dict[key] += merged_params[key]
                 modules_no_head = [name for name in self.gram_modules if not "head" in name]
                 fisher, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
+                #keys = list(self.network.state_dict().keys())
+                #sd = self.network.state_dict()
+                #for key in keys:
+                #    sd[key] = self.optimization_dict[key]
+                #self.network.load_state_dict(sd)
+                #for module in self.network.modules():
+                #    setattr(module, "fisher_weight", 0)
+                #fisher2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
                 torch.set_float32_matmul_precision(precision)
+                #for module in self.network.modules():
+                #    setattr(module, "fisher_weight", 0)
+                #fisher3, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 1)
+                #for module in self.network.modules():
+                #    setattr(module, "fisher_weight", 0)
+                #fisher4, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
+                #fisher1 = fisher1.to("cpu")
+                #fisher2 = fisher2.to("cpu")
+                fisher[fisher > num_samples] = num_samples
                 fisher = fisher.to("cpu")
             return {"fisher": fisher, "num_samples": num_samples}
 
