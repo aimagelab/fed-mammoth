@@ -53,7 +53,7 @@ def get_artifacts(args: dict, fabric) -> Tuple[BaseModel, Dataset]:
     client_models = []
     for _ in range(args["num_clients"]):
         net = NetworkClass(**{key: args[key] for key in network_signature})
-        client_models.append(ModelClass(fabric, net, **{key: args[key] for key in model_signature}))
+        client_models.append(ModelClass(fabric, net, **{key: args[key] for key in model_signature}).to("cpu"))
 
     return server_model, client_models, dataset
 
