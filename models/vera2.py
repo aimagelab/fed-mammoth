@@ -353,6 +353,7 @@ class Vera(BaseModel):
         if not self.lora_head:
             for key in self.head_keys:
                 self.head[key] = self.head[key].to(device)
+        return self
 
     def detach(self, only_lora: bool = False):
         self.cur_A = self.cur_A.detach()

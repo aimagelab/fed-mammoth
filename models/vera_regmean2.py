@@ -269,3 +269,4 @@ class VeraRegMean(Vera, RegMean):
         Vera.to(self, device)
         for key in self.lora_keys:
             self.fed_weights[key] = self.fed_weights[key].to(device)
+        return self

@@ -96,3 +96,4 @@ class BaseModel(nn.Module):
     def to(self, device):
         # self.device = device
         self.network.to(device)
+        return self

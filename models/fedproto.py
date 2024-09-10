@@ -126,3 +126,4 @@ class FedProto(FedAvg):
         # if self.global_proto is not None:
         #    for task in self.global_proto:
         #        self.global_proto[task] = self.global_proto[task].to(device)
+        return self

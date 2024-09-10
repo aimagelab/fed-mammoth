@@ -176,6 +176,7 @@ class RegMean(BaseModel):
         self.network.to(device)
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(device)
+        return self
 
     def get_server_info(self):
         return {"state_dict": deepcopy(self.network.state_dict())}

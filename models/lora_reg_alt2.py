@@ -660,6 +660,7 @@ class LoraRegMeanAlt(Lora, RegMean):
             for key in self.lora_keys:
                 self.cur_A[key] = self.cur_A[key].to(device)
                 self.cur_B[key] = self.cur_B[key].to(device)
+        return self
 
     def detach(self):
         for key in self.lora_keys:

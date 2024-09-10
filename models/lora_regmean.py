@@ -304,3 +304,4 @@ class LoraRegMean(Lora):
         super().to(device)
         for key in self.lora_keys:
             self.fed_weights[key] = self.fed_weights[key].to(device)
+        return self

@@ -311,6 +311,7 @@ class Vera(Lora):
         for key in self.lora_keys:
             self.vec_b[key] = self.vec_b[key].to(device)
             self.vec_d[key] = self.vec_d[key].to(device)
+        return self
 
     def detach(self, only_lora: bool = False):
         for key in self.lora_keys:

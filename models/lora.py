@@ -350,3 +350,4 @@ class Lora(BaseModel):
         if not self.lora_head:
             for key in self.head_keys:
                 self.head[key] = self.head[key].to(device)
+        return self
