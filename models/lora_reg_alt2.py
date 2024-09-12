@@ -560,6 +560,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                 #self.network.load_state_dict(sd)
                 for module in self.network.modules():
                     setattr(module, "fisher_weight", 0)
+                    setattr(module, "fisher_weight_pow2", 0)
                 #fisher2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
                 torch.set_float32_matmul_precision(precision)
                 #for module in self.network.modules():
