@@ -143,22 +143,33 @@ class LoraRegMeanAlt(Lora, RegMean):
             if len(grad_out.shape) > 2:
                 grad_out = grad_out.reshape(-1, grad_out.shape[-1])
                 inputs = inputs.reshape(-1, inputs.shape[-1])
-                grad_weight = (grad_output[0].permute(0, 2, 1) @ module.inputs).pow(2).sum(0)
+                grad_weight = (grad_output[0].permute(0, 2, 1) @ module.inputs)
+                grad_weight_pow2 = grad_weight.pow(2).sum(0)
+                #grad_weight = grad_weight.sum(0)
             else:
-                grad_weight = grad_out.T.pow(2) @ inputs.pow(2)
+                #grad_weight = grad_out.T @ inputs
+                grad_weight_pow2 = grad_out.T.pow(2) @ inputs.pow(2)
             
             if hasattr(module, "bias") and module.__compute_bias:
-                grad_bias = grad_out.T.pow(2).sum(-1)
+                grad_bias = grad_out.T
+                grad_bias_pow2 = grad_bias.pow(2).sum(-1)
+                grad_bias = grad_bias.sum(-1)
                 if not hasattr(module, "fisher_bias"):
                     setattr(module, "fisher_bias", grad_bias)
+                if not hasattr(module, "fisher_bias_pow2"):
+                    setattr(module, "fisher_bias_pow2", grad_bias_pow2)
                 else:
                     module.fisher_bias += grad_bias
+                    module.fisher_bias_pow2 += grad_bias_pow2
 
 
             if not hasattr(module, "fisher_weight"):
                 setattr(module, "fisher_weight", grad_weight)
+            if not hasattr(module, "fisher_weight_pow2"):
+                setattr(module, "fisher_weight_pow2", grad_weight_pow2)
             else:
-                module.fisher_weight += grad_weight
+                #module.fisher_weight += grad_weight
+                module.fisher_weight_pow2 += grad_weight_pow2
 
         def hook_forward(module, inputs, _):
             setattr(module, "inputs", inputs[0])
@@ -212,11 +223,13 @@ class LoraRegMeanAlt(Lora, RegMean):
         #        if f"{name}.{typ}" in param_resolution_dict:
         #            fisher[param_resolution_dict[f"{name}.{typ}"]] = getattr(module, f"fisher_{typ}")
         #            setattr(module, f"fisher_{typ}", 0)
-        fisher = []
+        fisher, fisher_pow2 = [], []
         for name, module in self.network.named_modules():
             if name in modules:
-                fisher.append(getattr(module, f"fisher_weight").reshape(-1))
-        fisher = torch.cat(fisher)
+                #fisher.append(getattr(module, f"fisher_weight").reshape(-1))
+                fisher_pow2.append(getattr(module, f"fisher_weight_pow2").reshape(-1))
+        #fisher = torch.cat(fisher)
+        fisher_pow2 = torch.cat(fisher_pow2)
 
         #fisher_cls = {}
         #for (name, module) in self.network.named_modules():
@@ -228,7 +241,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         for param, req_grad in zip(self.network.parameters(), require_grads_list):
             param.requires_grad = req_grad
 
-        return fisher, num_of_examples
+        #return fisher, fisher_pow2, num_of_examples
+        return fisher_pow2, num_of_examples
 
 
 
@@ -255,6 +269,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round = 0
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
+        self.network.train()
         self.cur_B = deepcopy(server_info["cur_B"])
         self.cur_A = deepcopy(server_info["cur_A"])
         for key in self.lora_keys:
@@ -295,6 +310,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round += 1
 
     def end_round_client(self, dataloader: DataLoader):
+        self.network.eval()
         self.optimizer.zero_grad()
         self.optimizer = None
         Lora.end_round_client(self, dataloader)
@@ -308,6 +324,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
+        self.network.eval()
         with torch.no_grad():
             if self.avg_type == "weighted":
                 total_samples = sum([client["num_train_samples"] for client in client_info])
@@ -534,14 +551,15 @@ class LoraRegMeanAlt(Lora, RegMean):
                 for key in self.lora_keys:
                     self.optimization_dict[key] += merged_params[key]
                 modules_no_head = [name for name in self.gram_modules if not "head" in name]
-                fisher, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
+                #fisher, fisher_pow2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
+                fisher_pow2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
                 #keys = list(self.network.state_dict().keys())
                 #sd = self.network.state_dict()
                 #for key in keys:
                 #    sd[key] = self.optimization_dict[key]
                 #self.network.load_state_dict(sd)
-                #for module in self.network.modules():
-                #    setattr(module, "fisher_weight", 0)
+                for module in self.network.modules():
+                    setattr(module, "fisher_weight", 0)
                 #fisher2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
                 torch.set_float32_matmul_precision(precision)
                 #for module in self.network.modules():
@@ -552,9 +570,11 @@ class LoraRegMeanAlt(Lora, RegMean):
                 #fisher4, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
                 #fisher1 = fisher1.to("cpu")
                 #fisher2 = fisher2.to("cpu")
-                fisher[fisher > num_samples] = num_samples
-                fisher = fisher.to("cpu")
-            return {"fisher": fisher, "num_samples": num_samples}
+                # fisher[fisher > num_samples] = num_samples
+                #fisher = fisher.to("cpu")
+                fisher_pow2 = fisher_pow2.to("cpu")
+            #return {"fisher": fisher, "fisher_pow2": fisher_pow2, "num_samples": num_samples}
+            return {"fisher_pow2": fisher_pow2, "num_samples": num_samples}
 
     def end_task_server(self, client_info: List[dict] = None):
         with torch.no_grad():
@@ -571,15 +591,19 @@ class LoraRegMeanAlt(Lora, RegMean):
                     self.old_fisher = {
                         key: torch.zeros(self.cur_B[key].shape[0], self.cur_A[key].shape[1], requires_grad=False) for key in self.lora_keys
                     }
-                fishers = torch.stack([client_info[i]["fisher"] for i in range(len(client_info))])
+                #grads_sum = torch.stack([client_info[i]["fisher"] for i in range(len(client_info))])
+                grads_pow2_sum = torch.stack([client_info[i]["fisher_pow2"] for i in range(len(client_info))])
                 num_samples = torch.tensor([client_info[i]["num_samples"] for i in range(len(client_info))]).reshape(
                     -1, 1
                 )
                 eps = 1e-20
-                avg_fisher = fishers.sum(0) / num_samples.sum()
+                #avg_grad = grads_sum.sum(0) / num_samples.sum()
+                avg_grad_pow2 = grads_pow2_sum.sum(0) / num_samples.sum()
+                #avg_fisher = avg_grad_pow2 - avg_grad.pow(2)
+                avg_fisher = avg_grad_pow2
                 avg_fisher += eps
-                # avg_fisher = avg_fisher.to(self.device)
-                del fishers
+                avg_fisher = avg_fisher.to("cpu")
+                #del grads_sum
                 self.to("cpu")
                 torch.cuda.empty_cache()
                 fisher_dict = {}
