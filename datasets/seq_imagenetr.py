@@ -41,12 +41,16 @@ class MyImageNetR(Dataset):
 
             # downlaod split file form "https://drive.google.com/file/d/1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q/view?usp=sharing"
             gdd.GoogleDriveDownloader.download_file_from_google_drive(
-                file_id="1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q", dest_path=self.root + "/imagenet-r/imagenet-r_train.yaml", showsize=True
+                file_id="1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q",
+                dest_path=self.root + "/imagenet-r/imagenet-r_train.yaml",
+                showsize=True,
             )
 
             # downlaod split file form "https://drive.google.com/file/d/1zXVayHfggvJfmyq-plBV6y3HhXiKVdLo/view?usp=sharing"
             gdd.GoogleDriveDownloader.download_file_from_google_drive(
-                file_id="1zXVayHfggvJfmyq-plBV6y3HhXiKVdLo", dest_path=self.root + "/imagenet-r/imagenet-r_test.yaml", showsize=True
+                file_id="1zXVayHfggvJfmyq-plBV6y3HhXiKVdLo",
+                dest_path=self.root + "/imagenet-r/imagenet-r_test.yaml",
+                showsize=True,
             )
 
             print("Done.", file=sys.stderr)
@@ -78,7 +82,7 @@ class MyImageNetR(Dataset):
 
 
 @register_dataset("seq-imagenetr")
-class SequentialImageNet(BaseDataset):
+class SequentialImageNetR(BaseDataset):
     N_TASKS = 10
     N_CLASSES_PER_TASK = 20
     normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))

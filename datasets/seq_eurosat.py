@@ -95,7 +95,7 @@ class SequentialEuroSAT(BaseDataset):
         num_clients: int,
         batch_size: int,
         partition_mode: str = "distribution",
-        distribution_alpha: float = 0.05,
+        distribution_alpha: float = 0.5,
         class_quantity: int = 1,
     ):
         super().__init__(
