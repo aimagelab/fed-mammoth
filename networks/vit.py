@@ -14,13 +14,14 @@ class VisionTransformer(BaseNetwork):
         super().__init__()
         print(f"Using ViT: {model_name}\tpretrained: {pretrained}\tnum_classes: {num_classes}")
         # self.model = timm_vit.__dict__[model_name](pretrained=pretrained, num_classes=num_classes)
-        self.model = timm.create_model(model_name, pretrained=pretrained, num_classes=num_classes)
+        self.model : timm.models.vision_transformer.VisionTransformer = timm.create_model(model_name, pretrained=pretrained, num_classes=num_classes)
 
     def forward(self, x, penultimate=False):
         if x.shape[-1] != 224:
             x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if penultimate:
             feats = self.model.forward_features(x)
+            pre = self.model.forward_head(feats, pre_logits=True)
             out = self.model.forward_head(feats)
-            return feats[:, 0, :], out
+            return pre, out
         return self.model(x)
