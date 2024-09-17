@@ -100,3 +100,4 @@ slurm_out
 *.pyc
 output/
 config.json
+*synthetic_data*

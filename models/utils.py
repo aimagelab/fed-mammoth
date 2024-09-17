@@ -66,7 +66,7 @@ class BaseModel(nn.Module):
     def end_task(self, dataloader: DataLoader = None, info: List[dict] = None):
         pass
 
-    def end_task_client(self, dataloader: DataLoader = None):
+    def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
         self.end_task(dataloader=dataloader)
 
     def end_task_server(self, client_info: List[dict] = None):
