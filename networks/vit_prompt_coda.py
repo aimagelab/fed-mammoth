@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+
+from networks.utils import BaseNetwork
 from .vit import VisionTransformer
 import copy
 import timm
@@ -8,6 +10,8 @@ from functools import partial
 
 from timm.models.vision_transformer import PatchEmbed
 from timm.models.layers import trunc_normal_, DropPath
+from networks import register_network
+from utils.tools import str_to_bool
 
 
 class Mlp(nn.Module):
@@ -448,30 +452,22 @@ def tensor_prompt(a, b, c=None, ortho=False):
     return p
 
 
-class ViTZoo(nn.Module):
-    def __init__(self, num_classes=10, pt=False, prompt_param=None, vit_type="1k"):
+@register_network("vit_prompt_coda")
+class ViTZoo(BaseNetwork):
+    def __init__(self, model_name:str = "vit_base_patch16_224.augreg_in21k", pretrained:str_to_bool = True, num_tasks: int = 10, num_classes: int = 100, pool_size: int = 100, prompt_length: int = 8):
         super(ViTZoo, self).__init__()
-
+        prompt_param = [num_tasks, [pool_size, prompt_length, 0]]
+        self.prompt_param = prompt_param
         # get last layer
         self.last = nn.Linear(512, num_classes)
         self.task_id = None
-
-        # get feature encoder
-        if pt:
-            zoo_model = VisionTransformer(
-                img_size=224, patch_size=16, embed_dim=768, depth=12, num_heads=12, ckpt_layer=0, drop_path_rate=0
-            )
-            from timm.models import vit_base_patch16_224
-
-            if vit_type == "1k":
-                print("loading ft in 1k")
-                load_dict = vit_base_patch16_224(pretrained=True).state_dict()
-            else:
-                print("loading orig 21k")
-                load_dict = timm.create_model("vit_base_patch16_224.augreg_in21k", pretrained=True).state_dict()
-            del load_dict["head.weight"]
-            del load_dict["head.bias"]
-            zoo_model.load_state_dict(load_dict)
+        zoo_model = VisionTransformer(
+            img_size=224, patch_size=16, embed_dim=768, depth=12, num_heads=12, ckpt_layer=0, drop_path_rate=0
+        )
+        load_dict = timm.create_model(model_name=model_name, pretrained=pretrained).state_dict()
+        del load_dict["head.weight"]
+        del load_dict["head.bias"]
+        zoo_model.load_state_dict(load_dict)
 
         # classifier
         self.last = nn.Linear(768, num_classes)
@@ -500,6 +496,19 @@ class ViTZoo(nn.Module):
             return out, prompt_loss
         else:
             return out
+        
+    def get_params(self) -> torch.Tensor:
+        param_class = torch.cat([param.reshape(-1) for param in self.last.parameters()])
+        param_prompt = torch.cat([param.reshape(-1) for param in self.prompt.parameters()])
+        return torch.cat([param_class, param_prompt])
+    
+    def set_params(self, new_params: torch.Tensor) -> None:
+        assert new_params.size() == self.get_params().size()
+        progress = 0
+        for pp in list(self.last.parameters()) + list(self.prompt.parameters()):
+            cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size())
+            progress += torch.tensor(pp.size()).prod()
+            pp.data = cand_params
 
 
 def vit_pt_imnet(out_dim, block_division=None, prompt_flag="None", prompt_param=None):

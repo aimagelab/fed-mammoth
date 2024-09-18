@@ -73,7 +73,7 @@ class CosineSchedule(_LRScheduler):
 
 
 @register_model("coda_prompt")
-class HGP(BaseModel):
+class CodaPrompt(BaseModel):
     def __init__(
         self,
         fabric,
@@ -173,7 +173,6 @@ class HGP(BaseModel):
         return {
             "params": self.network.get_params(),
             "num_train_samples": len(dataloader.dataset.data),
-            "client_statistics": self.clients_statistics,
         }
 
     def get_server_info(self):
