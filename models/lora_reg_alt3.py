@@ -42,6 +42,9 @@ class LoraRegMeanAlt(Lora, RegMean):
         only_square: int = 0,
         train_bias: str = "all",
         train_matrix: str = "alt",
+        reg_qkv: str_to_bool = True,
+        reg_proj: str_to_bool = True,
+        reg_fc: str_to_bool = True,
     ) -> None:
         Lora.__init__(
             self,
@@ -78,7 +81,13 @@ class LoraRegMeanAlt(Lora, RegMean):
         )
         final_modules = []
         for name in self.gram_modules:
-            if "fc" not in name:
+            if "head" in name:
+                final_modules.append(name)
+            elif "fc" in name and reg_fc:
+                final_modules.append(name)
+            elif "proj" in name and reg_proj:
+                final_modules.append(name)
+            elif "qkv" in name and reg_qkv:
                 final_modules.append(name)
         self.gram_modules = final_modules
         self.middle_names = {}
@@ -394,9 +403,9 @@ class LoraRegMeanAlt(Lora, RegMean):
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
         self.set_optimization()
-        head_modules = [mod for mod in self.gram_modules if "head" in mod]
+        gram_modules = [mod for mod in self.gram_modules if "head" not in mod]
         real_modules = deepcopy(self.gram_modules)
-        self.gram_modules = head_modules
+        self.gram_modules = gram_modules
         RegMean.end_round_client(self, dataloader)
         self.gram_modules = real_modules
         self.to("cpu", only_trainable=False)
@@ -405,29 +414,35 @@ class LoraRegMeanAlt(Lora, RegMean):
 
     def end_task_server(self, client_info: List[dict] = None):
         with torch.no_grad():
-            head_module = [mod for mod in self.gram_modules if "head" in mod][0]
-            gram = torch.stack([client_info[i]["grams"][head_module] for i in range(len(client_info))]).sum(0).to(self.device)
-            sd = self.network.state_dict()
-            keys = list(self.network.state_dict().keys())
-            for key in keys:
-                # head parameters
-                if "head" in key:
-                    if self.middle_names.get(key) is not None and "head" in key:  # regmean on Linear layer
-                        head = sd[key]
-                        if getattr(self, "run_weights_gram", None) is None:
-                            self.run_weights_gram = (head @ gram)
-                        else:
-                            self.run_weights_gram = self.run_weights_gram.to(self.device)
-                            self.run_weights_gram += (head @ gram)
-                        if getattr(self, "run_gram", None) is None:
-                            self.run_gram = gram
-                        else:
-                            self.run_gram = self.run_gram.to(self.device)
-                            self.run_gram += gram
-                        if self.cur_task > 0:
-                            sd[key] = self.run_weights_gram @ torch.pinverse(self.run_gram)
-            self.network.load_state_dict(sd)
-            self.set_optimization()
+            gram_modules = [mod for mod in self.gram_modules if "head" not in mod]
+            grams = {}
+            for module in gram_modules:
+                grams[module] = torch.stack([client_info[i]["grams"][module] for i in range(len(client_info))]).sum(0)
+            optimization_dict = deepcopy(self.network.state_dict())
+            if getattr(self, "run_weights_gram", None) is None:
+                self.run_weights_gram = {key: None for key in self.lora_keys if "weight" in key and self.middle_names.get(key) is not None and not "head" in key}
+            if getattr(self, "run_gram", None) is None:
+                self.run_gram = {key: None for key in self.lora_keys if "weight" in key and self.middle_names.get(key) is not None and not "head" in key}
+            for key in self.lora_keys:
+                if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
+                    B = self.cur_B[key].to(self.device)
+                    A = self.cur_A[key].to(self.device)
+                    gram = grams[self.middle_names[key]].to(self.device)
+                    if self.run_weights_gram.get(key) is None:
+                        self.run_weights_gram[key] = (B @ A @ gram)
+                    else:
+                        self.run_weights_gram[key] = self.run_weights_gram[key].to(self.device)
+                        self.run_weights_gram[key] += (B @ A @ gram)
+                    if self.run_gram.get(key) is None:
+                        self.run_gram[key] = gram
+                    else:
+                        self.run_gram[key] = self.run_gram[key].to(self.device)
+                        self.run_gram[key] += gram
+                    if self.cur_task > 0:
+                        optimization_dict[key] += self.run_weights_gram[key] @ torch.pinverse(self.run_gram[key])
+            if self.cur_task > 0:
+                self.optimization_dict = optimization_dict
+            
                     
             
     def set_optimization_cur_task(self, fabric=True):
