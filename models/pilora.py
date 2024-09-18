@@ -62,6 +62,9 @@ class PiLora(Lora):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         del self.old_delta
         self.old_B = [] #list of dicts, each dict contains the B matrices for a task, keys are the self.lora_keys
+        self.old_Q = [] #list of dicts, each dict contains the Q matrices for a task, keys are the self.lora_keys
+        self.old_K = [] #list of dicts, each dict contains the K matrices for a task, keys are the self.lora_keys
+        self.old_V = [] #list of dicts, each dict contains the V matrices for a task, keys are the self.lora_keys
         self.old_A = [] #list of dicts, each dict contains the A matrices for a task, keys are the self.lora_keys
         self.class_protos = {}
 
@@ -107,11 +110,15 @@ class PiLora(Lora):
             self.Q[key].requires_grad = True
             self.K[key].requires_grad = False
             self.V[key].requires_grad = True
-            self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
+            #self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
             self.cur_A[key].requires_grad = True
-            B = self.cur_B[key] + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-            A = self.cur_A[key] + (torch.stack([self.old_A[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-            optimization_dict[key] += B @ self.cur_A[key]
+            Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            K = self.K[key] #+ (torch.stack([self.old_K[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            self.cur_B[key] = torch.cat((Q, K, V))
+            B = self.cur_B[key]# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            A = self.cur_A[key] + (torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            optimization_dict[key] += B @ A
         return optimization_dict
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -143,7 +150,9 @@ class PiLora(Lora):
             if self.cur_task > 0:
                 for key in self.lora_keys:
                     for i in range(self.cur_task):
-                        loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
+                        #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
+                        loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
+                        loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
             loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
             loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl + 0.01 * loss_l1
 
@@ -234,8 +243,11 @@ class PiLora(Lora):
     def begin_task(self, n_classes_per_task: int):
         BaseModel.begin_task(self, n_classes_per_task)
         if self.cur_task > 0:
-            self.old_B.append({key: self.cur_B[key].detach() for key in self.lora_keys})
-            self.old_A.append({key: self.cur_A[key].detach() for key in self.lora_keys})
+            self.old_B.append({key: self.cur_B[key].detach().clone() for key in self.lora_keys})
+            self.old_A.append({key: self.cur_A[key].detach().clone() for key in self.lora_keys})
+            self.old_Q.append({key: self.Q[key].detach().clone() for key in self.lora_keys})
+            self.old_K.append({key: self.K[key].detach().clone() for key in self.lora_keys})
+            self.old_V.append({key: self.V[key].detach().clone() for key in self.lora_keys})
             self.init_matrices()
         self.cur_round = 0
         #self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(self.768, 1)) for i in range(self.cpt)])
@@ -244,6 +256,9 @@ class PiLora(Lora):
             for key in self.lora_keys:
                 self.old_B[i][key] = self.old_B[i][key].detach()
                 self.old_A[i][key] = self.old_A[i][key].detach()
+                self.old_Q[i][key] = self.old_Q[i][key].detach()
+                self.old_K[i][key] = self.old_K[i][key].detach()
+                self.old_V[i][key] = self.old_V[i][key].detach()
 
 
     def init_matrices(self, reverse=False):
@@ -285,6 +300,19 @@ class PiLora(Lora):
         self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
         self.cur_round += 1
+        for i in range(self.cur_task):
+            for key in self.lora_keys:
+                self.old_B[i][key] = self.old_B[i][key].detach()
+                self.old_A[i][key] = self.old_A[i][key].detach()
+                self.old_Q[i][key] = self.old_Q[i][key].detach()
+                self.old_K[i][key] = self.old_K[i][key].detach()
+                self.old_V[i][key] = self.old_V[i][key].detach()
+                self.old_B[i][key] = self.old_B[i][key].to(self.device)
+                self.old_A[i][key] = self.old_A[i][key].to(self.device)
+                self.old_Q[i][key] = self.old_Q[i][key].to(self.device)
+                self.old_K[i][key] = self.old_K[i][key].to(self.device)
+                self.old_V[i][key] = self.old_V[i][key].to(self.device)
+
 
     def begin_round_server(self):
         self.cur_round += 1
@@ -416,9 +444,19 @@ class PiLora(Lora):
                 self.cur_A[key] = self.cur_A[key].detach()
                 self.cur_B[key] = self.cur_B[key].to(self.device)
                 self.cur_A[key] = self.cur_A[key].to(self.device)
+                self.Q[key] = self.Q[key].detach()
+                self.K[key] = self.K[key].detach()
+                self.V[key] = self.V[key].detach()
+                self.Q[key] = self.Q[key].to(self.device)
+                self.K[key] = self.K[key].to(self.device)
+                self.V[key] = self.V[key].to(self.device)
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             for key in self.lora_keys:
-                B = self.cur_B[key] + (torch.stack([self.old_B[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                K = self.K[key] #+ (torch.stack([self.old_K[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                self.cur_B[key] = torch.cat((Q, K, V))
+                B = self.cur_B[key].to(self.device)# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
                 A = self.cur_A[key] + (torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
                 self.optimization_dict[key] += B @ A
 
