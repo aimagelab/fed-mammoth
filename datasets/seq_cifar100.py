@@ -64,6 +64,24 @@ class SequentialCifar100_224(SequentialCifar100):
     )
     INPUT_SHAPE = (224, 224, 3)
 
+@register_dataset("seq-cifar100_224_pilora")
+class SequentialCifar100_224_pilora(SequentialCifar100):
+    MEAN_NORM = (0.4914, 0.4822, 0.4465)
+    STD_NORM = (0.2023, 0.1994, 0.2010)
+    normalize = transforms.Normalize(MEAN_NORM, STD_NORM)
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(224),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ColorJitter(brightness=0.24705882352941178),
+            transforms.ToTensor(),
+            normalize,
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [transforms.Resize(224), transforms.ToTensor(), normalize]
+    )
+    INPUT_SHAPE = (224, 224, 3)
 
 @register_dataset("seq-cifar100_224_hgp")
 class SequentialCifar100_224_hgp(SequentialCifar100):
