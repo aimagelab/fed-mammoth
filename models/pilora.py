@@ -35,7 +35,9 @@ class PiLora(Lora):
         cl_merge: str = "individual_mean",
         temp: float = 1,
         lr_back: float = -1,
+        num_tasks: int = 10,
     ) -> None:
+        self.num_tasks = num_tasks
         self.temp = temp
         self.Q = {}
         self.K = {}
@@ -74,7 +76,7 @@ class PiLora(Lora):
         else:
             pre, _ = functional_call(self.network.module, self.optimization_dict, x, kwargs={'penultimate' : True})
         protos = torch.cat([self.class_protos[t][i] for t in range(len(self.class_protos)) for i in range(self.cpt)])
-        score = 1/(1 + torch.cdist(pre, protos, p=2))
+        score = F.softmax(-torch.cdist(pre, protos, p=2), dim=1)
         return score
 
     def init_lora_params(self, network, r):
@@ -126,7 +128,7 @@ class PiLora(Lora):
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict(fabric=fabric)
         eps = 1e-4
-        self.cur_B[self.lora_keys[0]].retain_grad()
+        #self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
             prelogits, outputs = functional_call(self.network, optimization_dict, inputs, kwargs={'penultimate' : True})
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
@@ -135,15 +137,15 @@ class PiLora(Lora):
             loss_dce = 0
             loss_pl = 0
             if self.class_protos is not None:
-                protos = torch.cat([self.class_protos[self.cur_task][i] for i in range(self.cpt)])
+                protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task+1) for i in range(self.cpt)])
                 #for idx, pre in enumerate(prelogits):
                 #    loss_dce += - torch.log((torch.exp(-self.temp * (pre - protos[labels[idx]]).pow(2).sum()) + eps) / (torch.exp(-self.temp * (pre - protos).pow(2).sum(-1)).sum() + eps))
                 #loss_dce /= len(labels)
                 distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
-                #logits = F.softmax(-distances, dim=1)
-                loss_dce = F.cross_entropy(-distances / self.temp, labels % self.cpt)
+                #logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
+                loss_dce = F.cross_entropy(-distances / self.temp, labels)
                 #loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
-                loss_pl = torch.index_select(distances, dim=1, index=(labels % self.cpt))
+                loss_pl = torch.index_select(distances, dim=1, index=(labels))
                 loss_pl = torch.diagonal(loss_pl)
                 loss_pl = torch.mean(loss_pl)
             loss_ort = 0
@@ -221,6 +223,10 @@ class PiLora(Lora):
             "Q": deepcopy(self.Q),
             "K": deepcopy(self.K),
             "V": deepcopy(self.V),
+            "old_A": deepcopy(self.old_A),
+            "old_Q": deepcopy(self.old_Q),
+            "old_K": deepcopy(self.old_K),
+            "old_V": deepcopy(self.old_V),
         }
         server_info["proto"] = deepcopy(self.class_protos)
         server_info["head"] = deepcopy(self.network.model.head.state_dict())
@@ -277,6 +283,13 @@ class PiLora(Lora):
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.cur_A = deepcopy(server_info["cur_A"])
+        self.Q = deepcopy(server_info["Q"])
+        self.K = deepcopy(server_info["K"])
+        self.V = deepcopy(server_info["V"])
+        self.old_A = deepcopy(server_info["old_A"])
+        self.old_Q = deepcopy(server_info["old_Q"])
+        self.old_K = deepcopy(server_info["old_K"])
+        self.old_V = deepcopy(server_info["old_V"])
         self.class_protos = deepcopy(server_info["proto"])
         self.detach()
         for key in self.lora_keys:
@@ -285,6 +298,9 @@ class PiLora(Lora):
             self.V[key].requires_grad = True
             self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
             self.cur_A[key].requires_grad = True
+        for i in range(self.cur_task):
+            for param in self.class_protos[i]:
+                param = param.detach()
         for param in self.class_protos[self.cur_task]:
             param.requires_grad = True
         self.network.model.head.load_state_dict(server_info["head"])
@@ -312,7 +328,6 @@ class PiLora(Lora):
                 self.old_Q[i][key] = self.old_Q[i][key].to(self.device)
                 self.old_K[i][key] = self.old_K[i][key].to(self.device)
                 self.old_V[i][key] = self.old_V[i][key].to(self.device)
-
 
     def begin_round_server(self):
         self.cur_round += 1
@@ -418,21 +433,6 @@ class PiLora(Lora):
 
     def end_task_server(self, client_info: List[dict] = None):
         pass
-
-    def set_optimization_cur_task(self, fabric=True):
-        self.detach()
-        self.to(self.device)
-        sd = self.network.state_dict()
-        if fabric:
-            optimization_dict = deepcopy(dict(self.network.state_dict()))
-        else:
-            optimization_dict = deepcopy(dict(self.network.module.state_dict()))
-        for key in self.lora_keys:
-            if self.cur_task > 0 and not "individual" in self.cl_merge and not "fisher" in self.cl_merge:
-                self.old_delta[key] = self.old_delta[key].to(self.device)
-                optimization_dict[key] += self.old_delta[key]
-            optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
-        self.optimization_dict = optimization_dict
 
     def set_optimization(self, fabric=True):
         with torch.no_grad():
