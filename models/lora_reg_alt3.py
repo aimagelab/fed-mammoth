@@ -139,8 +139,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict()
         with self.fabric.autocast():
-            outputs = functional_call(self.network, optimization_dict, inputs)
-            loss = self.loss(outputs, labels)
+            outputs = functional_call(self.network, optimization_dict, inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            loss = self.loss(outputs, labels % self.cpt)
         if update:
             self.fabric.backward(loss)
             # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
