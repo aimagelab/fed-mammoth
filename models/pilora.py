@@ -65,7 +65,6 @@ class PiLora(Lora):
         del self.old_delta
         self.old_B = [] #list of dicts, each dict contains the B matrices for a task, keys are the self.lora_keys
         self.old_Q = [] #list of dicts, each dict contains the Q matrices for a task, keys are the self.lora_keys
-        self.old_K = [] #list of dicts, each dict contains the K matrices for a task, keys are the self.lora_keys
         self.old_V = [] #list of dicts, each dict contains the V matrices for a task, keys are the self.lora_keys
         self.old_A = [] #list of dicts, each dict contains the A matrices for a task, keys are the self.lora_keys
         self.class_protos = {}
@@ -115,7 +114,7 @@ class PiLora(Lora):
             #self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
             self.cur_A[key].requires_grad = True
             Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-            K = self.K[key] #+ (torch.stack([self.old_K[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            K = self.K[key]
             V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
             self.cur_B[key] = torch.cat((Q, K, V))
             B = self.cur_B[key]# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
@@ -155,8 +154,8 @@ class PiLora(Lora):
                         #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
                         loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
                         loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
-            loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
-            loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl + 0.01 * loss_l1
+            #loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
+            loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl# + 0.01 * loss_l1
 
         if update:
             if fabric:
@@ -225,7 +224,6 @@ class PiLora(Lora):
             "V": deepcopy(self.V),
             "old_A": deepcopy(self.old_A),
             "old_Q": deepcopy(self.old_Q),
-            "old_K": deepcopy(self.old_K),
             "old_V": deepcopy(self.old_V),
         }
         server_info["proto"] = deepcopy(self.class_protos)
@@ -252,9 +250,8 @@ class PiLora(Lora):
             self.old_B.append({key: self.cur_B[key].detach().clone() for key in self.lora_keys})
             self.old_A.append({key: self.cur_A[key].detach().clone() for key in self.lora_keys})
             self.old_Q.append({key: self.Q[key].detach().clone() for key in self.lora_keys})
-            self.old_K.append({key: self.K[key].detach().clone() for key in self.lora_keys})
             self.old_V.append({key: self.V[key].detach().clone() for key in self.lora_keys})
-            self.init_matrices()
+            self.init_matrices(init_K=False)
         self.cur_round = 0
         #self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(self.768, 1)) for i in range(self.cpt)])
         self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(1, 768), requires_grad=True).to(self.device) for i in range(self.cpt)])
@@ -263,14 +260,16 @@ class PiLora(Lora):
                 self.old_B[i][key] = self.old_B[i][key].detach()
                 self.old_A[i][key] = self.old_A[i][key].detach()
                 self.old_Q[i][key] = self.old_Q[i][key].detach()
-                self.old_K[i][key] = self.old_K[i][key].detach()
                 self.old_V[i][key] = self.old_V[i][key].detach()
 
 
-    def init_matrices(self, reverse=False):
+    def init_matrices(self, reverse=False, init_K=True):
         for key in self.lora_keys:
             self.Q[key] = nn.Parameter(torch.zeros_like(self.Q[key], device = self.device), requires_grad = True)
-            self.K[key] = nn.Parameter(torch.zeros_like(self.K[key], device = self.device), requires_grad = False)
+            if init_K:
+                self.K[key] = nn.Parameter(torch.zeros_like(self.K[key], device = self.device), requires_grad = False)
+            else:
+                self.K[key] = self.K[key].to(self.device)
             self.V[key] = nn.Parameter(torch.zeros_like(self.V[key], device = self.device), requires_grad = True)
             self.cur_B[key] = torch.cat((self.Q[key],  #Q
                                             self.K[key],  #K
@@ -288,7 +287,6 @@ class PiLora(Lora):
         self.V = deepcopy(server_info["V"])
         self.old_A = deepcopy(server_info["old_A"])
         self.old_Q = deepcopy(server_info["old_Q"])
-        self.old_K = deepcopy(server_info["old_K"])
         self.old_V = deepcopy(server_info["old_V"])
         self.class_protos = deepcopy(server_info["proto"])
         self.detach()
@@ -321,12 +319,10 @@ class PiLora(Lora):
                 self.old_B[i][key] = self.old_B[i][key].detach()
                 self.old_A[i][key] = self.old_A[i][key].detach()
                 self.old_Q[i][key] = self.old_Q[i][key].detach()
-                self.old_K[i][key] = self.old_K[i][key].detach()
                 self.old_V[i][key] = self.old_V[i][key].detach()
                 self.old_B[i][key] = self.old_B[i][key].to(self.device)
                 self.old_A[i][key] = self.old_A[i][key].to(self.device)
                 self.old_Q[i][key] = self.old_Q[i][key].to(self.device)
-                self.old_K[i][key] = self.old_K[i][key].to(self.device)
                 self.old_V[i][key] = self.old_V[i][key].to(self.device)
 
     def begin_round_server(self):
@@ -453,7 +449,7 @@ class PiLora(Lora):
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             for key in self.lora_keys:
                 Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-                K = self.K[key] #+ (torch.stack([self.old_K[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                K = self.K[key]
                 V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
                 self.cur_B[key] = torch.cat((Q, K, V))
                 B = self.cur_B[key].to(self.device)# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
