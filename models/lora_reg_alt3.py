@@ -216,7 +216,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round += 1
 
     def end_round_client(self, dataloader: DataLoader):
-        self.network.eval()
+        #self.network.eval()
         self.optimizer.zero_grad()
         self.optimizer = None
         Lora.end_round_client(self, dataloader)
@@ -230,7 +230,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
-        self.network.eval()
+        #self.network.eval()
         with torch.no_grad():
             if self.avg_type == "weighted":
                 total_samples = sum([client["num_train_samples"] for client in client_info])
