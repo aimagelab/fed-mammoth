@@ -23,7 +23,8 @@ class VisionTransformer(BaseNetwork):
             x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if penultimate:
             feats = self.model.forward_features(x)
-            pre = self.model.forward_head(feats, pre_logits=True)
+            #pre = self.model.forward_head(feats, pre_logits=True)
+            pre = feats[:, 0]
             out = self.model.forward_head(feats)
             return pre, out
         return self.model(x)
