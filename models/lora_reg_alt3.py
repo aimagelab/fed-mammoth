@@ -12,7 +12,7 @@ from utils.tools import str_to_bool, compute_fisher_expectation_fabric
 
 from models.lora import Lora, merge_AB, zero_pad
 from models.regmean import RegMean
-from models.lora import Lora
+from models.lora_pre import Lora
 from tqdm import tqdm
 import math
 
