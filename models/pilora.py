@@ -37,10 +37,12 @@ class PiLora(Lora):
         lr_back: float = -1,
         num_tasks: int = 10,
         soft_temp: float = 0.2,
+        use_l1: str_to_bool = False,
     ) -> None:
         self.num_tasks = num_tasks
         self.temp = temp
         self.soft_temp = soft_temp
+        self.use_l1 = use_l1
         self.Q = {}
         self.K = {}
         self.V = {}
@@ -156,8 +158,10 @@ class PiLora(Lora):
                         #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
                         loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
                         loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
-            #loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
-            loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl# + 0.01 * loss_l1
+            loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl
+            if self.use_l1:
+                loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
+                loss += 0.01 * loss_l1
 
         if update:
             if fabric:
