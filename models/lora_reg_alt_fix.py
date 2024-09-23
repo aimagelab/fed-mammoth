@@ -158,10 +158,6 @@ class LoraRegMeanAlt(Lora, RegMean):
         if self.cur_task > 0 and self.is_server:
             self.to("cpu")
             for key in self.lora_keys:
-                self.old_delta_fisher[key] = self.old_delta_fisher[key] + (
-                    (self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key]
-                )
-                self.old_fisher[key] += self.cur_fisher[key]
                 # filler in order to test something meaningful after each comm round (not the last one)
                 self.old_delta[key] = (
                     self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
