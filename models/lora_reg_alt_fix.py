@@ -46,6 +46,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         reg_proj: str_to_bool = True,
         reg_fc: str_to_bool = True,
     ) -> None:
+        self.is_server = False
         Lora.__init__(
             self,
             fabric,
@@ -154,7 +155,7 @@ class LoraRegMeanAlt(Lora, RegMean):
     def begin_task(self, n_classes_per_task: int):
         BaseModel.begin_task(self, n_classes_per_task)
         #server
-        if "fisher" in self.cl_merge and getattr(self, "old_delta_fisher", None) is not None: 
+        if self.cur_task > 0 and self.is_server:
             self.to("cpu")
             for key in self.lora_keys:
                 self.old_delta_fisher[key] = self.old_delta_fisher[key] + (
@@ -229,6 +230,7 @@ class LoraRegMeanAlt(Lora, RegMean):
 
     def end_round_server(self, client_info: List[dict]):
         #self.network.eval()
+        self.is_server = True
         with torch.no_grad():
             if self.avg_type == "weighted":
                 total_samples = sum([client["num_train_samples"] for client in client_info])
