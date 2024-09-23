@@ -36,9 +36,11 @@ class PiLora(Lora):
         temp: float = 1,
         lr_back: float = -1,
         num_tasks: int = 10,
+        soft_temp: float = 0.2,
     ) -> None:
         self.num_tasks = num_tasks
         self.temp = temp
+        self.soft_temp = soft_temp
         self.Q = {}
         self.K = {}
         self.V = {}
@@ -414,7 +416,7 @@ class PiLora(Lora):
                 centers_distances = distances.sum(1)
                 reciprocal = 1 / (centers_distances + eps)  
                 normalized = (reciprocal - reciprocal.min()) / (reciprocal.max() - reciprocal.min())
-                soft = F.softmax(normalized * 0.2, dim=0)
+                soft = F.softmax(normalized * self.soft_temp, dim=0)
                 new_proto = (protos * soft.unsqueeze(1)).sum(0).unsqueeze(0)
                 self.class_protos[self.cur_task][num_c] = nn.Parameter(new_proto, requires_grad=False)
             torch.cuda.empty_cache()
