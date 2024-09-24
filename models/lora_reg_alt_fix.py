@@ -211,10 +211,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                 back = Bs if self.cur_train_matrix == "B" else As
                 params = [{"params": back, "lr": self.lr_back}, {"params": head_params}]
             else:
-                if not self.lora_head:
-                    params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
-                else:
-                    params = list(self.cur_B.values()) + list(self.cur_A.values())
+                params = list(self.cur_B.values()) + list(self.head.values()) if self.cur_train_matrix == "B" else list(self.cur_A.values()) + list(self.head.values())
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
