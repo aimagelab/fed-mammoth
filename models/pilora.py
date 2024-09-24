@@ -38,11 +38,15 @@ class PiLora(Lora):
         num_tasks: int = 10,
         soft_temp: float = 0.2,
         use_l1: str_to_bool = False,
+        use_pl: str_to_bool = False,
+        use_ort: str_to_bool = False,
     ) -> None:
         self.num_tasks = num_tasks
         self.temp = temp
         self.soft_temp = soft_temp
         self.use_l1 = use_l1
+        self.use_pl = use_pl
+        self.use_ort = use_ort
         self.Q = {}
         self.K = {}
         self.V = {}
@@ -137,28 +141,29 @@ class PiLora(Lora):
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
             #loss_ce = self.loss(outputs, labels % self.cpt)
             #loss_ce = 0
-            loss_dce = 0
-            loss_pl = 0
-            if self.class_protos is not None:
-                protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task+1) for i in range(self.cpt)])
-                #for idx, pre in enumerate(prelogits):
-                #    loss_dce += - torch.log((torch.exp(-self.temp * (pre - protos[labels[idx]]).pow(2).sum()) + eps) / (torch.exp(-self.temp * (pre - protos).pow(2).sum(-1)).sum() + eps))
-                #loss_dce /= len(labels)
-                distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
-                #logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
-                loss_dce = F.cross_entropy(-distances / self.temp, labels)
-                #loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
+            loss = 0
+            protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task+1) for i in range(self.cpt)])
+            #for idx, pre in enumerate(prelogits):
+            #    loss_dce += - torch.log((torch.exp(-self.temp * (pre - protos[labels[idx]]).pow(2).sum()) + eps) / (torch.exp(-self.temp * (pre - protos).pow(2).sum(-1)).sum() + eps))
+            #loss_dce /= len(labels)
+            distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
+            #logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
+            loss_dce = F.cross_entropy(-distances / self.temp, labels)
+            #loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
+            loss += loss_dce
+            if self.use_pl:
                 loss_pl = torch.index_select(distances, dim=1, index=(labels))
                 loss_pl = torch.diagonal(loss_pl)
                 loss_pl = torch.mean(loss_pl)
-            loss_ort = 0
-            if self.cur_task > 0:
+                loss += 0.001 * loss_pl
+            if self.use_ort and self.cur_task > 0:
+                loss_ort = 0
                 for key in self.lora_keys:
                     for i in range(self.cur_task):
                         #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
                         loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
                         loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
-            loss = loss_dce + 0.5 * loss_ort + 0.001 * loss_pl
+                loss += 0.5 * loss_ort
             if self.use_l1:
                 loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
                 loss += 0.01 * loss_l1
