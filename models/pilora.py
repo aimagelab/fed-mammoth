@@ -147,25 +147,31 @@ class PiLora(Lora):
             #    loss_dce += - torch.log((torch.exp(-self.temp * (pre - protos[labels[idx]]).pow(2).sum()) + eps) / (torch.exp(-self.temp * (pre - protos).pow(2).sum(-1)).sum() + eps))
             #loss_dce /= len(labels)
             distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
+            distances /= 768
+            distances = distances.sqrt()
             #logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
             loss_dce = F.cross_entropy(-distances / self.temp, labels)
             #loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
             loss += loss_dce
-            if self.use_pl:
-                loss_pl = torch.index_select(distances, dim=1, index=(labels))
-                loss_pl = torch.diagonal(loss_pl)
-                loss_pl = torch.mean(loss_pl)
-                loss += 0.001 * loss_pl
-            if self.use_ort and self.cur_task > 0:
-                loss_ort = 0
+            #if self.use_pl:
+            loss_pl = torch.index_select(distances, dim=1, index=(labels))
+            loss_pl = torch.diagonal(loss_pl)
+            loss_pl = torch.mean(loss_pl)
+            loss += 0.001 * loss_pl
+            #if self.use_ort and self.cur_task > 0:
+            loss_ort = 0
+            if self.cur_task > 0:
                 for key in self.lora_keys:
                     for i in range(self.cur_task):
                         #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
-                        loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
-                        loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
-                loss += 0.5 * loss_ort
-            if self.use_l1:
-                loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
+                        #loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
+                        #loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
+                        loss_ort += torch.abs(torch.mm(self.cur_A[key], self.old_A[i][key].T)).sum()
+            loss += 0.5 * loss_ort
+            #if self.use_l1:
+                #loss_l1 = torch.linalg.matrix_norm(self.Q[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.V[self.lora_keys[0]], ord=1)
+            if self.cur_task == 0:
+                loss_l1 = torch.linalg.matrix_norm(self.cur_A[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.cur_A[self.lora_keys[0]], ord=1)
                 loss += 0.01 * loss_l1
 
         if update:
