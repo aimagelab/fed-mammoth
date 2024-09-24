@@ -45,8 +45,10 @@ class LoraRegMeanAlt(Lora, RegMean):
         reg_qkv: str_to_bool = True,
         reg_proj: str_to_bool = True,
         reg_fc: str_to_bool = True,
+        adaptive_lr: str_to_bool = False,
     ) -> None:
         self.is_server = False
+        self.adaptive_lr = adaptive_lr
         Lora.__init__(
             self,
             fabric,
@@ -105,21 +107,25 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         del self.old_delta
 
-    def split_backbone_head(self):
-        backbone_params = []
+    def split_backbone_head(self, split=False):
+        Bs = []
+        As = []
         head_params = []
         for key in self.lora_keys:
             self.cur_B[key] = self.cur_B[key].detach()
             self.cur_A[key] = self.cur_A[key].detach()
             self.cur_B[key].requires_grad = True
             self.cur_A[key].requires_grad = True
-            backbone_params.append(self.cur_B[key])
-            backbone_params.append(self.cur_A[key])
+            Bs.append(self.cur_B[key])
+            As.append(self.cur_A[key])
         for key in self.head_keys:
             self.head[key] = self.head[key].detach()
             self.head[key].requires_grad = True
             head_params.append(self.head[key])
-        return backbone_params, head_params
+        if split:
+            return Bs, As, head_params
+        else:
+            return Bs + As, head_params
 
     def get_optimization_dict(self, fabric=True):
         if fabric:
@@ -186,18 +192,32 @@ class LoraRegMeanAlt(Lora, RegMean):
                 key: nn.Parameter(self.network.state_dict()[key].clone().detach(), requires_grad=True).to(self.device)
                 for key in self.head_keys
             }
-        if self.lr_back > 0:
-            backbone_params, head_params = self.split_backbone_head()
-            params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}]
+        self.set_train_matrix()
+        if self.adaptive_lr:
+            params = []
+            for key in self.lora_keys:
+                if self.cur_train_matrix =="B":
+                    n_params = self.cur_B[key].numel()
+                    lr = 6144 * self.lr_back  / (self.r/8 * n_params)
+                    params.append({"params": self.cur_B[key], "lr": lr})
+                else:
+                    n_params = self.cur_A[key].numel()
+                    lr = 6144 * self.lr_back  / (self.r/8 * n_params)
+                    params.append({"params": self.cur_A[key], "lr": lr})
+            params.append({"params": self.head.values()})
         else:
-            if not self.lora_head:
-                params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
+            if self.lr_back > 0:
+                Bs, As, head_params = self.split_backbone_head(split=True)
+                back = Bs if self.cur_train_matrix == "B" else As
+                params = [{"params": back, "lr": self.lr_back}, {"params": head_params}]
             else:
-                params = list(self.cur_B.values()) + list(self.cur_A.values())
+                if not self.lora_head:
+                    params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
+                else:
+                    params = list(self.cur_B.values()) + list(self.cur_A.values())
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
-        self.set_train_matrix()
         self.cur_round += 1
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
