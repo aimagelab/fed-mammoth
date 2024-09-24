@@ -486,93 +486,29 @@ class LoraRegMeanAlt(Lora, RegMean):
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
         if "fisher" in self.cl_merge:
-            #classes = set()
-            #num_samples = 0
-            #for images, labels in dataloader:
-            #    num_samples += images.shape[0]
-            #    for label in labels:
-            #        if label not in classes:
-            #            classes.add(label.item())
-            #classes = list(sorted(classes))
-            #if self.lr_back > 0:
-            #    backbone_params, head_params = self.split_backbone_head()
-            #    params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}]
-            #else:
-            #    if not self.lora_head:
-            #        params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
-            #    else:
-            #        params = list(self.cur_B.values()) + list(self.cur_A.values())
-            #OptimizerClass = getattr(torch.optim, self.optimizer_str)
-            #self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
-            #self.optimizer = self.fabric.setup_optimizers(self.optimizer)
-            #self.optimizer.zero_grad()
             if self.regmean_all:
                 precision = torch.get_float32_matmul_precision()
                 torch.set_float32_matmul_precision("high")
                 # self.detach()
                 self.detach()
-                # for key in self.lora_keys:
-                #    self.cur_B[key].requires_grad = True
-                #    self.cur_A[key].requires_grad = True
-                #merged_params = {
-                #    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
-                #    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=True)
-                #    for key in self.lora_keys
-                #}
+                torch.cuda.empty_cache()
                 merged_params = {
                 #    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
                     key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=False)
                     for key in self.lora_keys
                 }
                 # adding lora parameters on the network (using .module to get rid of fabric wrapper)
-                torch.cuda.empty_cache()
-                #merged_params = {
-                #    #key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
-                #    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=True)
-                #    for key in self.lora_keys
-                #}
                 self.optimization_dict = deepcopy(dict(self.network.module.state_dict()))
-                for key in self.lora_keys:
-                    self.optimization_dict[key] += merged_params[key]
-                #fisher = compute_fisher_expectation_fabric(
-                #    network=self,
-                #    data_loader=dataloader,
-                #    device=self.device,
-                #    classes=list(set(range(self.cur_offset, self.cur_offset + self.cpt))),
-                #    fabric=None,
-                #    parameters=list(merged_params.values()),
-                #    maxiter=self.fisher_maxiter,
-                #).reshape(-1)
-                merged_params = {
-                    # key: self.network.state_dict()[key] + (self.cur_B[key] @ self.cur_A[key]) for key in self.lora_keys
-                    key: torch.tensor(self.cur_B[key] @ self.cur_A[key], requires_grad=False)
-                    for key in self.lora_keys
-                }
                 for key in self.lora_keys:
                     self.optimization_dict[key] += merged_params[key]
                 modules_no_head = [name for name in self.gram_modules if not "head" in name]
                 #fisher, fisher_pow2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
                 fisher_pow2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader)
-                #keys = list(self.network.state_dict().keys())
-                #sd = self.network.state_dict()
-                #for key in keys:
-                #    sd[key] = self.optimization_dict[key]
-                #self.network.load_state_dict(sd)
                 for module in self.network.modules():
                     setattr(module, "fisher_weight", 0)
                     setattr(module, "fisher_weight_pow2", 0)
                 #fisher2, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
                 torch.set_float32_matmul_precision(precision)
-                #for module in self.network.modules():
-                #    setattr(module, "fisher_weight", 0)
-                #fisher3, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 1)
-                #for module in self.network.modules():
-                #    setattr(module, "fisher_weight", 0)
-                #fisher4, num_samples = self.__compute_fisher_hooks(modules_no_head, self.optimization_dict, dataloader, forward = 2)
-                #fisher1 = fisher1.to("cpu")
-                #fisher2 = fisher2.to("cpu")
-                # fisher[fisher > num_samples] = num_samples
-                #fisher = fisher.to("cpu")
                 fisher_pow2 = fisher_pow2.to("cpu")
             #return {"fisher": fisher, "fisher_pow2": fisher_pow2, "num_samples": num_samples}
             return {"fisher_pow2": fisher_pow2, "num_samples": num_samples}
