@@ -46,9 +46,11 @@ class LoraRegMeanAlt(Lora, RegMean):
         reg_proj: str_to_bool = True,
         reg_fc: str_to_bool = True,
         adaptive_lr: str_to_bool = False,
+        fix_A: str_to_bool = False,
     ) -> None:
         self.is_server = False
         self.adaptive_lr = adaptive_lr
+        self.fix_A = fix_A
         Lora.__init__(
             self,
             fabric,
@@ -169,10 +171,10 @@ class LoraRegMeanAlt(Lora, RegMean):
                     self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                 ) / self.cur_task
             self.to(self.device)
-            self.init_matrices()
+            self.init_matrices(freeze_A=self.fix_A)
         else:
             if self.cur_task > 0 :
-                self.init_matrices()
+                self.init_matrices(freeze_A=self.fix_A)
         self.cur_round = 0
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
