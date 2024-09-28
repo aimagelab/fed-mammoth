@@ -293,12 +293,12 @@ class LoraRegMeanAlt(Lora, RegMean):
                             B = self.cur_B[key].to(self.device).to(dtype)
                             E = torch.stack(
                                 [
-                                    (B.to(self.device).to(dtype) @ A_[key].to(self.device).to(dtype)) @ client["grams"][name].to(self.device).to(dtype)
-                                    for  A_, client in zip(cl_A, client_info)
+                                    (A_[key].to(self.device).to(dtype)) @ client["grams"][name].to(self.device).to(dtype)
+                                    for A_, client in zip(cl_A, client_info)
                                 ]
                             ).sum(0)
                             G = torch.stack([client["grams"][name].to(self.device).to(dtype) for client in client_info]).sum(0)
-                            A = torch.pinverse(B.T @ B) @ B.T @ E @ torch.pinverse(G)  # A
+                            A = E @ torch.pinverse(G)  # A
                             self.cur_A[key] = A.to(torch.float32).to("cpu")
                             for i in range(len(cl_A)):
                                 cl_A[i][key] = cl_A[i][key].to("cpu")
