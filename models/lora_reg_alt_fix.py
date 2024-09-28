@@ -47,10 +47,12 @@ class LoraRegMeanAlt(Lora, RegMean):
         reg_fc: str_to_bool = True,
         adaptive_lr: str_to_bool = False,
         fix_A: str_to_bool = False,
+        regmean_rounds: int = 1,
     ) -> None:
         self.is_server = False
         self.adaptive_lr = adaptive_lr
         self.fix_A = fix_A
+        self.regmean_rounds = regmean_rounds
         Lora.__init__(
             self,
             fabric,
@@ -240,7 +242,8 @@ class LoraRegMeanAlt(Lora, RegMean):
             self.optimization_dict[key] = self.head[key]
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
-        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
+        for i in range(self.regmean_rounds):
+            RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
@@ -318,7 +321,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                     for key in self.lora_keys:
                         if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                             name = self.middle_names[key]
-                            print(key)
+                            #print(key)
                             for i in range(len(cl_B)):
                                 cl_B[i][key] = cl_B[i][key].to(self.device).to(dtype)
                                 client_info[i]["grams"][name] = client_info[i]["grams"][name].to(self.device).to(dtype)
