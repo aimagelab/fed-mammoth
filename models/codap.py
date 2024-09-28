@@ -85,7 +85,11 @@ class CodaPrompt(BaseModel):
         avg_type: str = "weighted",
         linear_probe: str_to_bool = False,
         num_epochs: int = 5,
+        clip_grads: str_to_bool = False,
+        use_scheduler: str_to_bool = False,
     ) -> None:
+        self.clip_grads = clip_grads
+        self.use_scheduler = use_scheduler
         self.lr = lr
         self.wd = wd_reg
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
@@ -109,7 +113,11 @@ class CodaPrompt(BaseModel):
 
         if update:
             self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            if self.clip_grads:
+                try:
+                    self.fabric.clip_gradients(self.network, self.optimizer, max_norm=1.0, norm_type=2)
+                except:
+                    pass
             self.optimizer.step()
 
         return loss.item()
@@ -166,7 +174,8 @@ class CodaPrompt(BaseModel):
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
 
     def end_epoch(self):
-        self.scheduler.step()
+        if self.use_scheduler:
+            self.scheduler.step()
         return None
 
     def get_client_info(self, dataloader: DataLoader):
