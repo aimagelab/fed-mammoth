@@ -53,7 +53,7 @@ class BaseDataset:
                     num_samples_per_client_task = []
 
                     iterations += 1
-                    assert iterations < 1000
+                    assert iterations < 10000
                     if partition_mode == "quantity":
                         trials = 0
                         while trials < 1000:
