@@ -134,8 +134,9 @@ class RegMean(BaseModel):
 
     def end_round_client(self, dataloader: DataLoader):
         self.network.eval()
-        self.optimizer.zero_grad()
-        self.optimizer = None
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+            self.optimizer = None
         hooks = {name: None for name in self.gram_modules}
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
