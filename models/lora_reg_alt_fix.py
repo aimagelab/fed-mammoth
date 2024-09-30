@@ -234,8 +234,9 @@ class LoraRegMeanAlt(Lora, RegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         #self.network.eval()
-        self.optimizer.zero_grad()
-        self.optimizer = None
+        #self.optimizer.zero_grad()
+        #self.optimizer = None
+        
         Lora.end_round_client(self, dataloader)
         # setting up the parameters to correctly compute the Gram matrices for the next round
         self.set_optimization()
