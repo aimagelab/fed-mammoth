@@ -85,6 +85,7 @@ class LoraRegMeanAlt(Lora, RegMean):
             lr_back,
             only_square,
             train_bias,
+            clip_grad
         )
         final_modules = []
         for name in self.gram_modules:

@@ -34,8 +34,13 @@ class RegMean(BaseModel):
         lr_back: float = -1,
         only_square: int = 0,
         train_bias: str = "all",
+        clip_grad: str_to_bool = False,
     ) -> None:
         self.reg_dtype_64 = reg_dtype_64
+        self.optimizer_str = optimizer
+        self.lr = lr
+        self.wd_reg = wd_reg
+        self.clip_grad = clip_grad
         if alpha_regmean_backbone < 0:
             alpha_regmean_backbone = alpha_regmean_head
         if "all" not in train_bias:
@@ -45,13 +50,12 @@ class RegMean(BaseModel):
                         p.requires_grad = False
                     elif "head" in n and "head" not in train_bias:
                         p.requires_grad = False
-        if lr_back > 0:
-            backbone_params, head_params = self.split_backbone_head()
-            params = [{"params": backbone_params, "lr": lr_back}, {"params": head_params}]
-            super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
-        else:
-            super(RegMean, self).__init__(fabric, network, device, optimizer, lr, wd_reg)
         self.lr_back = lr_back
+        if self.lr_back < 0:
+            self.lr_back = self.lr
+        #backbone_params, head_params = self.split_backbone_head()
+        #params = [{"params": backbone_params, "lr": lr_back}, {"params": head_params}]
+        super().__init__(fabric, network, device, optimizer, lr, wd_reg)#, params=params)
         self.avg_type = avg_type
         self.regmean_all = regmean_all
         self.alpha_regmean = [alpha_regmean_backbone, alpha_regmean_head]
@@ -110,7 +114,8 @@ class RegMean(BaseModel):
 
         if update:
             self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            if self.clip_grad:
+                self.fabric.clip_gradients(self.network, self.optimizer, max_norm=1.0, norm_type=2)
             self.optimizer.step()
 
         return loss.item()
@@ -118,10 +123,19 @@ class RegMean(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         sd = server_info["state_dict"]
         self.network.load_state_dict(sd)
+        self.network.train()
+        backbone_params, head_params = self.split_backbone_head()
+        params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}]
+        OptimizerClass = getattr(torch.optim, self.optimizer_str)
+        self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
+        self.optimizer = self.fabric.setup_optimizers(self.optimizer)
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
 
     def end_round_client(self, dataloader: DataLoader):
+        self.network.eval()
+        self.optimizer.zero_grad()
+        self.optimizer = None
         hooks = {name: None for name in self.gram_modules}
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
