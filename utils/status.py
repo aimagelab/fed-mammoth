@@ -1,6 +1,14 @@
 import sys
 from datetime import datetime
 
+def format_loss(loss) -> str:
+    if type(loss) == float or type(loss) == int:
+        return f"{loss:.6f}"
+    elif type(loss) == dict:
+        return " ".join([f"{k}: {v:.6f}" for k, v in loss.items()])
+    else: #list
+        return " ".join([f"{v:.6f}" for v in loss])
+
 
 def progress_bar(
     task: int,
@@ -26,7 +34,7 @@ def progress_bar(
             client_idx,
             epoch,
             max_epochs,
-            round(loss, 6),
+            format_loss(loss),
         ),
         file=sys.stdout,
         end="",

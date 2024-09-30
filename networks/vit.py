@@ -18,7 +18,16 @@ class VisionTransformer(BaseNetwork):
         # self.model = timm_vit.__dict__[model_name](pretrained=pretrained, num_classes=num_classes)
         self.model : timm.models.vision_transformer.VisionTransformer = timm.create_model(model_name, pretrained=pretrained, num_classes=num_classes)
 
-    def forward(self, x, penultimate=False):
+    def forward(self, x, penultimate=False, prelogits=False):
+        """
+        penultimate returns the classification token after the forward_features,
+        prelogits returns the prelogits using the vit argument pre_logits=True, which involves more stuff
+        than the previous
+        """
+        if prelogits:
+            feats = self.model.forward_features(x)
+            pre = self.model.forward_head(feats, pre_logits=True)
+            return pre
         if x.shape[-1] != 224:
             x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if penultimate:
