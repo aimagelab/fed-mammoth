@@ -18,18 +18,32 @@ class VisionTransformer(BaseNetwork):
         # self.model = timm_vit.__dict__[model_name](pretrained=pretrained, num_classes=num_classes)
         self.model : timm.models.vision_transformer.VisionTransformer = timm.create_model(model_name, pretrained=pretrained, num_classes=num_classes)
 
-    def forward(self, x, penultimate=False, prelogits=False):
+    def forward(self, x, penultimate=False, prelogits=False, block=None):
         """
         penultimate returns the classification token after the forward_features,
         prelogits returns the prelogits using the vit argument pre_logits=True, which involves more stuff
         than the previous
         """
+        if block is not None:
+            if type(block) == int:
+                if block != 0:
+                    return self.model.blocks[block](x)
+                elif block == 0:
+                    if x.shape[-1] != 224:
+                        x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
+                    x = self.model.patch_embed(x)
+                    x = self.model._pos_embed(x)
+                    x = self.model.patch_drop(x)
+                    x = self.model.norm_pre(x)
+                    return self.model.blocks[block](x)
+            elif type(block) == str and block == "head":
+                return self.model.forward_head(x)
+        if x.shape[-1] != 224:
+            x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if prelogits:
             feats = self.model.forward_features(x)
             pre = self.model.forward_head(feats, pre_logits=True)
             return pre
-        if x.shape[-1] != 224:
-            x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
         if penultimate:
             feats = self.model.forward_features(x)
             #pre = self.model.forward_head(feats, pre_logits=True)

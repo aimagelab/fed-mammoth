@@ -142,3 +142,8 @@ class SequentialImageNetR(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+@register_dataset("joint-imagenetr")
+class JointImagenetR(SequentialImageNetR):
+    N_TASKS = 1
+    N_CLASSES_PER_TASK = 200
