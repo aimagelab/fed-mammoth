@@ -48,9 +48,16 @@ class RegMean_v2(RegMean):
         batch_size: int = 32,
         save_dir: str = "regmean_v2_features",
         gram_fraction: float = 1.0,
+        inverse: str_to_bool = "pinv",
     ) -> None:
         gram_fraction = min(1.0, max(0.0, gram_fraction))
         self.gram_fraction = gram_fraction
+        if inverse == "inv":
+            print("Using torch.inverse().")
+            self.inverse = torch.inverse
+        else:
+            print("Using torch.pinverse().")
+            self.inverse = torch.pinverse
         RegMean.__init__(
             self,
             fabric,
@@ -340,8 +347,8 @@ class RegMean_v2(RegMean):
             #client.network.load_state_dict(sd)
             client.reset_grams()
         #computing gram matrices on the client-side one layer at a time
-        for blk, key in zip(range(self.blk_max), regmean_keys):
-            print(f"Computing gram matrices for layer {blk}, {key}.")
+        for blk, key in tqdm(zip(range(self.blk_max), regmean_keys), desc="Computing gram matrices", total=self.blk_max):
+            # print(f"Computing gram matrices for layer {blk}, {key}.")
             grams = []
             for i, client in enumerate(self.clients):
                 client.to(self.device)
@@ -356,7 +363,8 @@ class RegMean_v2(RegMean):
             name = self.middle_names[key]
             grams = torch.stack(grams)
             grams = grams.to(self.device)
-            print(grams.sum(), "Computing result.")
+            # print(grams.sum(), "Computing result.")
+            inv = self.inverse(grams.sum(0))
             sd[key] = (
                 torch.stack(
                     [
@@ -364,9 +372,10 @@ class RegMean_v2(RegMean):
                         for i, client in enumerate(self.clients)
                     ]
                 ).sum(0)
-                @ torch.pinverse(grams.sum(0))
+                @ inv
             ).to(torch.float32)
-            print("Substituting result.")
+            assert torch.dist(grams.sum(0) @ inv, torch.eye(grams.size(-1), device=self.device, dtype=dtype)) < 1e-3
+            # print("Substituting result.")
             s_sd = self.network.state_dict()
             s_sd[key] = sd[key]
             self.network.load_state_dict(s_sd)
