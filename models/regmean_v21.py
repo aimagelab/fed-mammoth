@@ -12,6 +12,7 @@ from utils.tools import str_to_bool
 from models.regmean import RegMean
 import os
 import shutil
+from pathlib import Path
 
 from tqdm import tqdm
 
@@ -22,7 +23,7 @@ def extract_block_number_from_module_name(module_name):
     return int(module_name.split("blocks.")[1].split(".")[0])
 
 
-@register_model("regmean_v2")
+@register_model("regmean_v21")
 class RegMean_v2(RegMean):
 
     def __init__(
@@ -45,7 +46,11 @@ class RegMean_v2(RegMean):
         clip_grad: str_to_bool = False,
         train_only_regmean: str_to_bool = False,
         batch_size: int = 32,
+        save_dir: str = "regmean_v2_features",
+        gram_fraction: float = 1.0,
     ) -> None:
+        gram_fraction = min(1.0, max(0.0, gram_fraction))
+        self.gram_fraction = gram_fraction
         RegMean.__init__(
             self,
             fabric,
@@ -75,6 +80,39 @@ class RegMean_v2(RegMean):
                     p.requires_grad = True
                 else:
                     p.requires_grad = False
+        self.module_to_block = {name: extract_block_number_from_module_name(name) for name in self.all_gram_modules}
+        self.blocks = list(set(self.module_to_block.values()))
+        self.temp_features = torch.tensor([], dtype=self.gram_dtype)
+        self.save_features = False
+        self.saved_features = False
+        self.last_used_block = -1
+        self.batch_size = batch_size
+        self.save_dir = save_dir
+        self.all_norm_modules = []
+        if os.path.exists(self.save_dir):
+            shutil.rmtree(self.save_dir)
+
+        for name, module in self.network.named_modules():
+            # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
+            # list(module.parameters())
+            if (
+                len(list(module.parameters())) > 0
+                and len(list(module.children())) == 0
+                and (
+                    (
+                        ("norm1" in name or ("norm" in name and not "block" in name))
+                        and (
+                            only_square <= 0
+                            or module.state_dict()["weight"].shape[0]
+                            == module.state_dict()["weight"].shape[1]
+                            == only_square
+                        )
+                    )
+                )
+            ):
+                self.all_norm_modules.append(name)
+                #self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
+        self.norm_modules = self.all_norm_modules[0:1]
 
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -91,23 +129,79 @@ class RegMean_v2(RegMean):
 
         return loss.item()
 
+    def begin_task(self, n_classes_per_task: int):
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
+        return super().begin_task(n_classes_per_task)
+    
+    def begin_round_server(self):
+        if not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
+        return super().begin_round_server()
+
+
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         RegMean.begin_round_client(self, dataloader, server_info)
+        self.save_features = False
+        self.saved_features = False
+        self.temp_features = torch.tensor([], dtype=torch.float32)
+        for name in self.gram_modules:
+            self.features[name] = torch.tensor([], dtype=self.gram_dtype)
 
     def compute_gram_matrices(self, dataloader: DataLoader, idx: int = 0):
         self.network.eval()
+        total_samples = len(dataloader.dataset)
+        needed_samples = int(total_samples * self.gram_fraction)
         if self.optimizer is not None:
             self.optimizer.zero_grad()
             self.optimizer = None
+        if self.save_features:
+            norm_hooks = {name: None for name in self.norm_modules}
+            for name, module in self.network.named_modules():
+                if name in self.norm_modules:
+                    norm_hooks[name] = module.register_forward_hook(self.norm_hook_handler(name))
         hooks = {name: None for name in self.gram_modules}
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
                 # module.forward_handle = module.register_forward_hook(self.hook_forward)
                 hooks[name] = module.register_forward_hook(self.hook_handler(name))
         with torch.no_grad():
-            for inputs, _ in dataloader:
-                inputs = inputs.to(self.device)
-                self.network(inputs)
+            #if not self.saved_features:
+            exit_loop = False
+            path = Path(self.save_dir) / ("features_" + str(idx) + ".pt")
+            if not os.path.exists(path):
+                for idx, (x, y) in enumerate(dataloader):
+                    if idx * x.size(0) > needed_samples:
+                        x = x[: needed_samples - (idx - 1) * x.size(0)]
+                        y = y[: needed_samples - (idx - 1) * x.size(0)]
+                        exit_loop = True
+                    x, y = x.to(self.device), y.to(self.device)
+                    block = self.module_to_block[self.gram_modules[0]]
+                    prev_block = self.blocks[self.blocks.index(block) - 1]
+                    if block != 0:
+                        x = self.network.forward(x, block = prev_block)
+                    self.network.forward(x, block = self.module_to_block[self.gram_modules[0]])
+                    if exit_loop:
+                        break
+            else:
+                features = torch.load(path, weights_only=True)
+                dl = DataLoader(features, batch_size=self.batch_size, shuffle=False)
+                for idx, x in enumerate(dl):
+                    if idx * x.size(0) > needed_samples:
+                        x = x[: needed_samples - (idx - 1) * x.size(0)]
+                        exit_loop = True
+                    x = x.to(self.device)
+                    block = self.module_to_block[self.gram_modules[0]]
+                    prev_block = self.blocks[self.blocks.index(block) - 1]
+                    if not self.saved_features:
+                        x = self.network.forward(x, block = prev_block)
+                    self.network.forward(x, block = self.module_to_block[self.gram_modules[0]])
+                    if exit_loop:
+                        break
+            if self.save_features:
+                torch.save(self.temp_features, path)
+                self.saved_features = True
+            self.temp_features = torch.tensor([], dtype=self.gram_dtype)
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
                 if "head" in name:
@@ -121,6 +215,9 @@ class RegMean_v2(RegMean):
                     + (1 - alpha) * torch.eye(shape, dtype=self.gram_dtype) * self.features[name]
                 )
                 hooks[name].remove()
+            if self.save_features:
+                if name in self.norm_modules:
+                    norm_hooks[name].remove()
 
     def hook_handler(self, name):
         def hook_forward(module, inputs, _):
@@ -136,14 +233,40 @@ class RegMean_v2(RegMean):
                 self.features[name] += tmp
 
         return hook_forward
+    
+    def norm_hook_handler(self, name):
+        name = name
+        def hook_forward(module, inputs, _):
+            x = inputs[0].detach().to(torch.float32).to("cpu")
+            if len(self.temp_features) == 0:
+                self.temp_features = x
+            else:
+                self.temp_features = torch.cat([self.temp_features, x], dim=0)
+
+        return hook_forward
 
     def set_blk(self, blk: int):
         self.blk_counter = blk
         if blk == -1:
             #self.gram_modules = self.all_gram_modules
             self.gram_modules = []
+            self.save_features = False
         else:
             self.gram_modules = [self.all_gram_modules[blk]]
+            if self.last_used_block != self.module_to_block[self.gram_modules[0]]:
+                self.last_used_block = self.module_to_block[self.gram_modules[0]]
+                self.temp_features = torch.tensor([], dtype=self.gram_dtype)
+                if self.last_used_block != 0:
+                    self.save_features = True
+                    if "head" in self.gram_modules[0]:
+                        self.norm_modules = [self.all_norm_modules[-1]]
+                    else:
+                        self.norm_modules = [self.all_norm_modules[self.module_to_block[self.gram_modules[0]]]]
+                    self.saved_features = False
+                else:
+                    self.save_features = False
+            else:
+                self.save_features = False
 
     def end_round_client(self, dataloader: DataLoader):
         return
@@ -173,6 +296,7 @@ class RegMean_v2(RegMean):
     def reset_grams(self):
         for name in self.all_gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
+        self.temp_features = torch.tensor([], dtype=torch.float32)
 
     def get_server_info(self):
         return {"state_dict": deepcopy(self.network.state_dict())}
@@ -227,11 +351,12 @@ class RegMean_v2(RegMean):
                 grams.append(client.features[client.gram_modules[0]].to(dtype))
                 client.reset_grams()
                 client.to("cpu")
+                torch.cuda.empty_cache()
             #merging blk-th layer with regmean
             name = self.middle_names[key]
             grams = torch.stack(grams)
             grams = grams.to(self.device)
-            print(grams.sum())
+            print(grams.sum(), "Computing result.")
             sd[key] = (
                 torch.stack(
                     [
@@ -241,6 +366,7 @@ class RegMean_v2(RegMean):
                 ).sum(0)
                 @ torch.pinverse(grams.sum(0))
             ).to(torch.float32)
+            print("Substituting result.")
             s_sd = self.network.state_dict()
             s_sd[key] = sd[key]
             self.network.load_state_dict(s_sd)
@@ -248,24 +374,5 @@ class RegMean_v2(RegMean):
                 c_sd = client.network.state_dict()
                 c_sd[key] = sd[key]
                 client.network.load_state_dict(c_sd)
-        #self.network.state_dict()[key] = sd[key]
-        #for key in merging_keys:
-        #    if (
-        #        "weight" in key and self.middle_names.get(key) is not None
-        #    ):  # it means that we apply regmean to this layer
-        #        name = self.middle_names[key]
-        #        sd[key] = (
-        #            torch.stack(
-        #                [
-        #                    client["state_dict"][key].to(dtype) @ client["grams"][name].to(dtype)
-        #                    for client in client_info
-        #                ]
-        #            ).sum(0)
-        #            @ torch.pinverse(torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0))
-        #        ).to(torch.float32)
-        #    else: # if merging_keys == keys, we apply fedavg to the other layers, otherwise we never enter this "else" statement
-        #        sd[key] = torch.stack(
-        #            [client["state_dict"][key] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
-        #        ).sum(
-        #            0
-        #        )  # fedavg for the other layers
+        if os.path.exists(self.save_dir):
+            shutil.rmtree(self.save_dir)

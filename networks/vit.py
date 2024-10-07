@@ -37,6 +37,11 @@ class VisionTransformer(BaseNetwork):
                     x = self.model.norm_pre(x)
                     return self.model.blocks[block](x)
             elif type(block) == str and block == "head":
+                x = self.model.norm(x)
+                #x = self.pool(x)
+                #x = self.fc_norm(x)
+                #x = self.head_drop(x)
+                #x = self.head(x)
                 return self.model.forward_head(x)
         if x.shape[-1] != 224:
             x = nn.functional.interpolate(x, size=(224, 224), mode="bicubic", align_corners=False)
