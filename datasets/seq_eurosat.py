@@ -153,7 +153,7 @@ class SequentialEuroSAT224(SequentialEuroSAT):
 
     INPUT_SHAPE = (224, 224, 3)
 
-@register_dataset("join-eurosat_224")
+@register_dataset("joint-eurosat_224")
 class JointEuroSAT224(SequentialEuroSAT224):
     N_CLASSES_PER_TASK = 10
     N_TASKS = 1
