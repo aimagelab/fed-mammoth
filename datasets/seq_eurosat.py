@@ -136,6 +136,7 @@ class SequentialEuroSAT224(SequentialEuroSAT):
     normalize = transforms.Normalize(mean=MEAN, std=STD)
     TRAIN_TRANSFORM = transforms.Compose(
         [
+            transforms.ToPILImage(),
             transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -144,6 +145,7 @@ class SequentialEuroSAT224(SequentialEuroSAT):
     )
     TEST_TRANSFORM = transforms.Compose(
         [
+            transforms.ToPILImage(),
             transforms.Resize(224, interpolation=3),  # bicubic
             transforms.CenterCrop(224),
             transforms.ToTensor(),
