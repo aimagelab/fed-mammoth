@@ -155,7 +155,7 @@ class RegMean_v2(RegMean):
     
     def begin_round_server(self):
         if getattr(self, "created_dir", None) is None:
-            setattr(self, "created_dir", True)
+            setattr(self, "created_dir", False)
         if not self.created_dir:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
@@ -163,14 +163,17 @@ class RegMean_v2(RegMean):
                 #shutil.rmtree(self.save_dir)
                 sleep(random()*3)
                 for i in range(10000):
+                    save_dir = self.save_dir
                     if not os.path.exists(save_dir + "_" + str(i)):
                         save_dir = save_dir + "_" + str(i)
                         print(f"Creating save directory {save_dir}.")
+                        os.makedirs(save_dir)
                         break
                     sleep(random()*3)
                 if i == 10000:
                     raise Exception("Could not create save directory.")
                 self.save_dir = save_dir
+        self.created_dir = True
         return super().begin_round_server()
 
 
@@ -371,7 +374,7 @@ class RegMean_v2(RegMean):
             client.reset_grams()
         #computing gram matrices on the client-side one layer at a time
         for blk, key in tqdm(zip(range(self.blk_max), regmean_keys), desc="Computing gram matrices", total=self.blk_max):
-            # print(f"Computing gram matrices for layer {blk}, {key}.")
+            print(f"Computing gram matrices for layer {blk}, {key}.")
             grams = []
             for i, client in enumerate(self.clients):
                 client.to(self.device)
