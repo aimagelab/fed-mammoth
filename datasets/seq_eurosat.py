@@ -125,3 +125,35 @@ class SequentialEuroSAT(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+
+@register_dataset("seq-eurosat_224")
+class SequentialEuroSAT224(SequentialEuroSAT):
+    N_CLASSES_PER_TASK = 2
+    N_TASKS = 5
+
+    MEAN, STD = [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]
+    normalize = transforms.Normalize(mean=MEAN, std=STD)
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(224, interpolation=3),  # bicubic
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ],
+    )
+
+    INPUT_SHAPE = (224, 224, 3)
+
+@register_dataset("join-eurosat_224")
+class JointEuroSAT224(SequentialEuroSAT224):
+    N_CLASSES_PER_TASK = 10
+    N_TASKS = 1
