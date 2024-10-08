@@ -24,6 +24,16 @@ def extract_block_number_from_module_name(module_name):
         return "head"
     return int(module_name.split("blocks.")[1].split(".")[0])
 
+def delete_files_in_directory(directory_path):
+   try:
+     with os.scandir(directory_path) as entries:
+       for entry in entries:
+         if entry.is_file():
+            os.unlink(entry.path)
+     print("All files deleted successfully.")
+   except OSError:
+     print("Error occurred while deleting files.")
+
 
 @register_model("regmean_v21")
 class RegMean_v2(RegMean):
@@ -144,20 +154,23 @@ class RegMean_v2(RegMean):
         return super().begin_task(n_classes_per_task)
     
     def begin_round_server(self):
-        if not os.path.exists(self.save_dir):
-            os.makedirs(self.save_dir)
-        else:
-            #shutil.rmtree(self.save_dir)
-            sleep(random()*3)
-            for i in range(10000):
-                if not os.path.exists(save_dir + "_" + str(i)):
-                    save_dir = save_dir + "_" + str(i)
-                    print(f"Creating save directory {save_dir}.")
-                    break
+        if getattr(self, "created_dir", None) is None:
+            setattr(self, "created_dir", True)
+        if not self.created_dir:
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
+            else:
+                #shutil.rmtree(self.save_dir)
                 sleep(random()*3)
-            if i == 10000:
-                raise Exception("Could not create save directory.")
-            self.save_dir = save_dir
+                for i in range(10000):
+                    if not os.path.exists(save_dir + "_" + str(i)):
+                        save_dir = save_dir + "_" + str(i)
+                        print(f"Creating save directory {save_dir}.")
+                        break
+                    sleep(random()*3)
+                if i == 10000:
+                    raise Exception("Could not create save directory.")
+                self.save_dir = save_dir
         return super().begin_round_server()
 
 
@@ -393,5 +406,10 @@ class RegMean_v2(RegMean):
                 c_sd = client.network.state_dict()
                 c_sd[key] = sd[key]
                 client.network.load_state_dict(c_sd)
+        delete_files_in_directory(self.save_dir)
+
+    def __del__(self):
+        delete_files_in_directory(self.save_dir)
         if os.path.exists(self.save_dir):
-            shutil.rmtree(self.save_dir)
+            os.rmdir(self.save_dir)
+        super().__del__()
