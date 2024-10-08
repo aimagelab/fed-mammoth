@@ -15,6 +15,8 @@ import shutil
 from pathlib import Path
 
 from tqdm import tqdm
+from time import time, sleep
+from random import random
 
 
 def extract_block_number_from_module_name(module_name):
@@ -94,10 +96,10 @@ class RegMean_v2(RegMean):
         self.saved_features = False
         self.last_used_block = -1
         self.batch_size = batch_size
-        self.save_dir = save_dir
+        #self.save_dir = save_dir
         self.all_norm_modules = []
-        if os.path.exists(self.save_dir):
-            shutil.rmtree(self.save_dir)
+        self.save_dir = save_dir
+
 
         for name, module in self.network.named_modules():
             # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
@@ -137,13 +139,25 @@ class RegMean_v2(RegMean):
         return loss.item()
 
     def begin_task(self, n_classes_per_task: int):
-        if not os.path.exists(self.save_dir):
-            os.makedirs(self.save_dir)
+        #if not os.path.exists(self.save_dir):
+        #    os.makedirs(self.save_dir)
         return super().begin_task(n_classes_per_task)
     
     def begin_round_server(self):
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
+        else:
+            #shutil.rmtree(self.save_dir)
+            sleep(random()*3)
+            for i in range(10000):
+                if not os.path.exists(save_dir + "_" + str(i)):
+                    save_dir = save_dir + "_" + str(i)
+                    print(f"Creating save directory {save_dir}.")
+                    break
+                sleep(random()*3)
+            if i == 10000:
+                raise Exception("Could not create save directory.")
+            self.save_dir = save_dir
         return super().begin_round_server()
 
 
@@ -154,6 +168,7 @@ class RegMean_v2(RegMean):
         self.temp_features = torch.tensor([], dtype=torch.float32)
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
+        self.save_dir = server_info["save_dir"]
 
     def compute_gram_matrices(self, dataloader: DataLoader, idx: int = 0):
         self.network.eval()
@@ -277,11 +292,6 @@ class RegMean_v2(RegMean):
 
     def end_round_client(self, dataloader: DataLoader):
         return
-        #self.compute_gram_matrices(dataloader)
-        #self.blk_counter += 1
-        #if self.blk_counter == self.blk_max:
-        #    self.blk_counter = 0
-        #self.set_blk(self.blk_counter)
         
 
     def get_client_info(self, dataloader: DataLoader):
@@ -306,7 +316,7 @@ class RegMean_v2(RegMean):
         self.temp_features = torch.tensor([], dtype=torch.float32)
 
     def get_server_info(self):
-        return {"state_dict": deepcopy(self.network.state_dict())}
+        return {"state_dict": deepcopy(self.network.state_dict()), "save_dir" : self.save_dir}
 
     def end_round_server(self, client_info: List[dict]):
         if getattr(self, "clients", None) is None:
