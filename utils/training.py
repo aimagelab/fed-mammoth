@@ -170,6 +170,9 @@ def train(
     # TODO: it is probably needed a final evaluation here. At least for models that do something at the end_task()
 
     print("\nTotal training time:", get_time_str(time() - start_time))
+    for client_model in client_models:
+        client_model.end_training()
+    server_model.end_training()
 
     if args["wandb"]:
         wandb.finish()

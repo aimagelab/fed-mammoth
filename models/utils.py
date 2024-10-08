@@ -97,3 +97,6 @@ class BaseModel(nn.Module):
         # self.device = device
         self.network.to(device)
         return self
+    
+    def end_training(self):
+        pass

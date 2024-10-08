@@ -408,7 +408,7 @@ class RegMean_v2(RegMean):
                 client.network.load_state_dict(c_sd)
         delete_files_in_directory(self.save_dir)
 
-    def __del__(self):
+    def end_training(self,):
         delete_files_in_directory(self.save_dir)
         if os.path.exists(self.save_dir):
             os.rmdir(self.save_dir)
