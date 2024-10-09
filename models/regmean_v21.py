@@ -415,4 +415,3 @@ class RegMean_v2(RegMean):
         delete_files_in_directory(self.save_dir)
         if os.path.exists(self.save_dir):
             os.rmdir(self.save_dir)
-        super().__del__()
