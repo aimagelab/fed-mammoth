@@ -93,7 +93,7 @@ def train(
                 train_loader = fabric.setup_dataloaders(train_loader)
                 test_loader = fabric.setup_dataloaders(test_loader)
                 model = client_models[client_idx]
-                model.to("cuda")
+                model.to(model.device)
                 model.begin_round_client(train_loader, server_info)
                 for epoch in range(args["num_epochs"]):
                     for i, (inputs, labels) in enumerate(train_loader):
@@ -132,7 +132,7 @@ def train(
 
             print("\nRound time:", get_time_str(time() - last_round_time))
             server_model.end_round_server(clients_info)
-            server_model.to("cuda")
+            server_model.to(server_model.device)
             accuracy = evaluate(fabric, task, server_model, dataset)
             if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
                 "debug_mode"
@@ -148,12 +148,12 @@ def train(
             train_loader = fabric.setup_dataloaders(train_loader)
             test_loader = fabric.setup_dataloaders(test_loader)
             model = client_models[client_idx]
-            model.to("cuda")
+            model.to(model.device)
             client_info.append(model.end_task_client(train_loader, server_info))
             model.to("cpu")
             torch.cuda.empty_cache()
         server_model.end_task_server(client_info=client_info)
-        server_model.to("cuda")
+        server_model.to(model.device)
         torch.cuda.empty_cache()
         accuracy = evaluate(fabric, task, server_model, dataset)
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
