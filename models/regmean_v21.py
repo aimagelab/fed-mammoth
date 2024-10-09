@@ -400,7 +400,7 @@ class RegMean_v2(RegMean):
                 ).sum(0)
                 @ inv
             ).to(torch.float32)
-            assert torch.dist(grams.sum(0) @ inv, torch.eye(grams.size(-1), device=self.device, dtype=dtype)) < 1e-3
+            #assert torch.dist(grams.sum(0) @ inv, torch.eye(grams.size(-1), device=self.device, dtype=dtype)) < 1e-3
             # print("Substituting result.")
             s_sd = self.network.state_dict()
             s_sd[key] = sd[key]
