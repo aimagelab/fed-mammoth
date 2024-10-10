@@ -114,6 +114,8 @@ class RegMean_v2(RegMean):
             for idx, (x, _) in enumerate(dataloader):
                 if idx * x.size(0) > needed_samples:
                     x = x[: needed_samples - (idx - 1) * x.size(0)]
+                    if x.size(0) == 0:
+                        break
                     exit_loop = True
                 x = x.to(self.device)
                 self.network(x)
