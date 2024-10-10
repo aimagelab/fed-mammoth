@@ -111,7 +111,7 @@ class RegMean_v2(RegMean):
                 hooks[name] = module.register_forward_hook(self.hook_handler(name))
         with torch.no_grad():
             exit_loop = False
-            for idx, x, _ in enumerate(dataloader):
+            for idx, (x, _) in enumerate(dataloader):
                 if idx * x.size(0) > needed_samples:
                     x = x[: needed_samples - (idx - 1) * x.size(0)]
                     exit_loop = True
