@@ -45,7 +45,10 @@ class RegMean_v2(RegMean):
         clip_grad: str_to_bool = False,
         train_only_regmean: str_to_bool = False,
         batch_size: int = 32,
+        gram_fraction: float = 1.0,
     ) -> None:
+        gram_fraction = min(1.0, max(0.0, gram_fraction))
+        self.gram_fraction = gram_fraction
         RegMean.__init__(
             self,
             fabric,
@@ -96,6 +99,8 @@ class RegMean_v2(RegMean):
 
     def compute_gram_matrices(self, dataloader: DataLoader, idx: int = 0):
         self.network.eval()
+        total_samples = len(dataloader.dataset)
+        needed_samples = int(total_samples * self.gram_fraction)
         if self.optimizer is not None:
             self.optimizer.zero_grad()
             self.optimizer = None
@@ -105,9 +110,15 @@ class RegMean_v2(RegMean):
                 # module.forward_handle = module.register_forward_hook(self.hook_forward)
                 hooks[name] = module.register_forward_hook(self.hook_handler(name))
         with torch.no_grad():
-            for inputs, _ in dataloader:
-                inputs = inputs.to(self.device)
-                self.network(inputs)
+            exit_loop = False
+            for idx, x, _ in enumerate(dataloader):
+                if idx * x.size(0) > needed_samples:
+                    x = x[: needed_samples - (idx - 1) * x.size(0)]
+                    exit_loop = True
+                x = x.to(self.device)
+                self.network(x)
+                if exit_loop:
+                    break
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
                 if "head" in name:
