@@ -103,6 +103,7 @@ class LoRM(Lora, RegMean):
             lr_back.append(lr_A)
         else:
             lr_back.append(lr)
+        self.lr_back = lr_back
         del self.old_delta
 
     def split_backbone_head(self, split=False):
