@@ -168,10 +168,10 @@ class LoRM(Lora, RegMean):
                     self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                 ) / self.cur_task
             self.to(self.device)
-            self.init_matrices(freeze_A=self.fix_A)
+            self.init_matrices(freeze_A=False)
         else:
             if self.cur_task > 0 :
-                self.init_matrices(freeze_A=self.fix_A)
+                self.init_matrices(freeze_A=False)
         self.cur_round = 0
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
