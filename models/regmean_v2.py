@@ -32,7 +32,7 @@ class RegMean_v2(RegMean):
         device: str,
         optimizer: str = "AdamW",
         lr: float = 1e-5,
-        wd_reg: float = 0.1,
+        wd_reg: float = 0.0,
         avg_type: str = "weighted",
         regmean_all: str_to_bool = True,
         alpha_regmean_head: float = 0.5,
@@ -46,9 +46,12 @@ class RegMean_v2(RegMean):
         train_only_regmean: str_to_bool = False,
         batch_size: int = 32,
         gram_fraction: float = 1.0,
+        linear_probe_epochs: int = 0,
     ) -> None:
         gram_fraction = min(1.0, max(0.0, gram_fraction))
         self.gram_fraction = gram_fraction
+        self.linear_probe_epochs = linear_probe_epochs
+        self.batch_size = batch_size
         RegMean.__init__(
             self,
             fabric,
@@ -78,6 +81,7 @@ class RegMean_v2(RegMean):
                     p.requires_grad = True
                 else:
                     p.requires_grad = False
+        self.classifier = None
 
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -93,9 +97,21 @@ class RegMean_v2(RegMean):
             self.optimizer.step()
 
         return loss.item()
+    
+    def forward(self, x: torch.Tensor):
+        if self.classifier is not None:
+            x, _ = self.network(x, penultimate=True)
+            x = self.classifier(x)
+        else:
+            x = self.network(x)
+        return x
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         RegMean.begin_round_client(self, dataloader, server_info)
+
+    def begin_task(self, n_classes_per_task: int):
+        self.classifier = None
+        return super().begin_task(n_classes_per_task)
 
     def compute_gram_matrices(self, dataloader: DataLoader, idx: int = 0):
         self.network.eval()
@@ -282,3 +298,40 @@ class RegMean_v2(RegMean):
         #        ).sum(
         #            0
         #        )  # fedavg for the other layers
+
+    def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
+        return dataloader
+
+    def end_task_server(self, client_info: List[dict] = None):
+        if self.linear_probe_epochs == 0:
+            return
+        self.network.train()
+        features = []
+        labels_ = []
+        embed_dim = self.network.model.head.weight.shape[1]
+        num_classes = self.network.model.head.weight.shape[0]
+        self.classifier = nn.Linear(embed_dim, num_classes).to(self.device)
+        nn.init.xavier_normal_(self.classifier.weight)
+        for dl in client_info:
+            for i, (inputs, labels) in enumerate(dl):
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                with self.fabric.autocast(), torch.no_grad():
+                    prelogits, _ = self.network(inputs, penultimate=True)
+                features.append(prelogits)
+                labels_.append(labels)
+        features = torch.cat(features)
+        labels_ = torch.cat(labels_)
+        batch_size = 256
+        lr = 1e-3
+        params = [{"params": self.classifier.parameters()}]
+        OptimizerClass = getattr(torch.optim, self.optimizer_str)
+        optimizer = OptimizerClass(params, lr=lr, weight_decay=self.wd_reg)
+        for epoch in tqdm(range(self.linear_probe_epochs)):
+            for i in range(0, len(features), batch_size):
+                inputs, labels = features[i : i + batch_size].to(self.device), labels_[i : i + batch_size].to(self.device)
+                optimizer.zero_grad()
+                outputs = self.classifier(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+                loss = self.loss(outputs, labels % self.cpt)
+                loss.backward()
+                optimizer.step()
+        self.network.eval()

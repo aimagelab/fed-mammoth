@@ -32,12 +32,15 @@ class MyImageNetR(Dataset):
             # Download the tarfile
             urllib.request.urlretrieve(tarfile_url, "downloaded_file.tar")
 
+            # move the downloaded tarfile to the root
+            os.rename("downloaded_file.tar", self.root + "/imagenet-r.tar")
+
             # Extract the tarfile
             with tarfile.open("downloaded_file.tar", "r") as tar:
                 tar.extractall(self.root)
 
             # Remove the downloaded tarfile
-            os.remove("downloaded_file.tar")
+            os.remove(self.root + "/imagenet-r.tar")
 
             # downlaod split file form "https://drive.google.com/file/d/1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q/view?usp=sharing"
             gdd.GoogleDriveDownloader.download_file_from_google_drive(
