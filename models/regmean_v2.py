@@ -312,6 +312,7 @@ class RegMean_v2(RegMean):
         num_classes = self.network.model.head.weight.shape[0]
         self.classifier = nn.Linear(embed_dim, num_classes).to(self.device)
         nn.init.xavier_normal_(self.classifier.weight)
+        torch.cuda.empty_cache()
         for dl in client_info:
             for i, (inputs, labels) in enumerate(dl):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)

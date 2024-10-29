@@ -35,6 +35,7 @@ class RegMean(BaseModel):
         only_square: int = 0,
         train_bias: str = "all",
         clip_grad: str_to_bool = False,
+        linear_probe_epochs: int = 0,
     ) -> None:
         self.reg_dtype_64 = reg_dtype_64
         self.optimizer_str = optimizer
@@ -95,6 +96,8 @@ class RegMean(BaseModel):
                     self.gram_modules.append(name)
                     self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         self.features = {key: torch.tensor([], dtype=self.gram_dtype) for key in self.gram_modules}
+        self.linear_probe_epochs = linear_probe_epochs
+        self.classifier = None
 
     def split_backbone_head(self):
         backbone_params = []
@@ -105,6 +108,14 @@ class RegMean(BaseModel):
             else:
                 backbone_params.append(p)
         return backbone_params, head_params
+
+    def forward(self, x: torch.Tensor):
+        if self.classifier is not None:
+            x, _ = self.network(x, penultimate=True)
+            x = self.classifier(x)
+        else:
+            x = self.network(x)
+        return x
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -119,6 +130,10 @@ class RegMean(BaseModel):
             self.optimizer.step()
 
         return loss.item()
+
+    def begin_task(self, n_classes_per_task: int):
+        self.classifier = None
+        return super().begin_task(n_classes_per_task)
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         sd = server_info["state_dict"]
@@ -228,3 +243,41 @@ class RegMean(BaseModel):
                     0
                 )  # fedavg for the other layers
         self.network.load_state_dict(sd)
+
+    def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
+        return dataloader
+
+    def end_task_server(self, client_info: List[dict] = None):
+        if self.linear_probe_epochs == 0:
+            return
+        self.network.train()
+        features = []
+        labels_ = []
+        embed_dim = self.network.model.head.weight.shape[1]
+        num_classes = self.network.model.head.weight.shape[0]
+        self.classifier = nn.Linear(embed_dim, num_classes).to(self.device)
+        nn.init.xavier_normal_(self.classifier.weight)
+        torch.cuda.empty_cache()
+        for dl in client_info:
+            for i, (inputs, labels) in enumerate(dl):
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                with self.fabric.autocast(), torch.no_grad():
+                    prelogits, _ = self.network(inputs, penultimate=True)
+                features.append(prelogits)
+                labels_.append(labels)
+        features = torch.cat(features)
+        labels_ = torch.cat(labels_)
+        batch_size = 256
+        lr = 1e-3
+        params = [{"params": self.classifier.parameters()}]
+        OptimizerClass = getattr(torch.optim, self.optimizer_str)
+        optimizer = OptimizerClass(params, lr=lr, weight_decay=self.wd_reg)
+        for epoch in tqdm(range(self.linear_probe_epochs)):
+            for i in range(0, len(features), batch_size):
+                inputs, labels = features[i : i + batch_size].to(self.device), labels_[i : i + batch_size].to(self.device)
+                optimizer.zero_grad()
+                outputs = self.classifier(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+                loss = self.loss(outputs, labels % self.cpt)
+                loss.backward()
+                optimizer.step()
+        self.network.eval()
