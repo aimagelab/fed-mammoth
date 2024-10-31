@@ -318,8 +318,8 @@ class RegMean_v2(RegMean):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 with self.fabric.autocast(), torch.no_grad():
                     prelogits, _ = self.network(inputs, penultimate=True)
-                features.append(prelogits)
-                labels_.append(labels)
+                features.append(prelogits.to("cpu"))
+                labels_.append(labels.to("cpu"))
         features = torch.cat(features)
         labels_ = torch.cat(labels_)
         batch_size = 256
