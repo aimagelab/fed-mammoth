@@ -50,7 +50,6 @@ class RegMean_v2(RegMean):
     ) -> None:
         gram_fraction = min(1.0, max(0.0, gram_fraction))
         self.gram_fraction = gram_fraction
-        self.linear_probe_epochs = linear_probe_epochs
         self.batch_size = batch_size
         RegMean.__init__(
             self,
@@ -82,6 +81,7 @@ class RegMean_v2(RegMean):
                 else:
                     p.requires_grad = False
         self.classifier = None
+        self.linear_probe_epochs = linear_probe_epochs
 
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
