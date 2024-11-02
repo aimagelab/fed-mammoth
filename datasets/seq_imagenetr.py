@@ -36,7 +36,7 @@ class MyImageNetR(Dataset):
             os.rename("downloaded_file.tar", self.root + "/imagenet-r.tar")
 
             # Extract the tarfile
-            with tarfile.open("downloaded_file.tar", "r") as tar:
+            with tarfile.open(self.root + "/imagenet-r.tar", "r") as tar:
                 tar.extractall(self.root)
 
             # Remove the downloaded tarfile
