@@ -41,7 +41,8 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
         "Task accuracies:",
         task_accuracies,
     )
-    return round(correct / total * 100, 2)
+    res = [round(correct / total * 100, 2), task_accuracies]
+    return res
 
 
 def train(
@@ -134,6 +135,13 @@ def train(
             server_model.end_round_server(clients_info)
             server_model.to(server_model.device)
             accuracy = evaluate(fabric, task, server_model, dataset)
+            if args["wandb"]:
+                results = {
+                    "Mean_accuracy": accuracy,
+                }
+                for i in range(len(accuracy[1])):
+                    results[f"Task_{i + 1}_accuracy"] = accuracy[1][i]
+                wandb.log(results)
             if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
                 "debug_mode"
             ]:
@@ -162,6 +170,7 @@ def train(
         if args["wandb"]:
             results = {
                 "Mean_accuracy": accuracy,
+                "End of task Accuracy": accuracy,
                 # TODO: add other things here
             }
 

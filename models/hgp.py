@@ -327,3 +327,11 @@ class HGP(BaseModel):
         name += f"_task_{task}_round_{comm_round}_checkpoint.pt"
         self.fabric.save(os.path.join(output_folder, name), checkpoint)
         self.network.train(training_status)
+
+
+    def load_checkpoint(self, checkpoint_path: str) -> int:
+        checkpoint = self.fabric.load(checkpoint_path)
+        self.network.load_state_dict(checkpoint["network"].state_dict())
+        self.optimizer.load_state_dict(checkpoint["optimizer"].state_dict())
+        self.mogs_per_task = checkpoint["mogs"]
+        return checkpoint["task"], checkpoint["comm_round"]
