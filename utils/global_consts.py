@@ -21,4 +21,5 @@ ADDITIONAL_ARGS = {
     "participation_rate": (float, 1.0),
     "test_local": (str_to_bool, False),
     "validation_interval": (int, 0), # 0 means no validation
+    "save_models": (str_to_bool, False),
 }

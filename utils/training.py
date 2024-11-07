@@ -227,9 +227,9 @@ def train(
                 for i in range(len(accuracy[1])):
                     results[f"Task_{i + 1}_accuracy"] = accuracy[1][i]
                 wandb.log(results)
-            if (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
+            if ((epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
                 "debug_mode"
-            ]:
+            ]) and args["save_models"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
             torch.cuda.empty_cache()
             if args["validation_interval"] > 0 and (comm_round + 1) % args["validation_interval"] == 0:
