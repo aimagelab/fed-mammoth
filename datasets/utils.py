@@ -32,19 +32,59 @@ class BaseDataset:
         class_quantity=None,
         format="numpy",
     ):
-        assert partition_mode in ["distribution", "quantity"]
-        if partition_mode == "distribution":
+        assert partition_mode in ["distribution", "quantity", "extended"]
+        if partition_mode == "distribution" or partition_mode == "extended":
             assert distribution_alpha is not None
         elif partition_mode == "quantity":
             assert class_quantity is not None
 
         num_samples_per_client = []
         for split in ["train", "test"]:
+            print(f"Splitting {split} data")
             dataset = getattr(self, f"{split}_dataset")
             min_samples_split = 6 if split == "train" else 1
             for task in range(0, self.N_TASKS):
                 min_samples = 0
                 iterations = 0
+                if split == "train" and partition_mode == "extended":
+                    default_samples = 7
+                    base_class = task * self.N_CLASSES_PER_TASK
+                    cur_classes = np.arange(base_class, base_class + self.N_CLASSES_PER_TASK)
+                    cpt = self.N_CLASSES_PER_TASK
+                    total_samples = np.stack([dataset.data[dataset.targets == clas].shape[0] for clas in cur_classes]).sum()
+                    classes_data = [dataset.data[dataset.targets == clas] for clas in cur_classes]
+                    classes_targets = [dataset.targets[dataset.targets == clas] for clas in cur_classes]
+                    unrolled_assignments_per_class = np.concatenate([np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]).flatten()
+                    clients_assignments_per_class = [np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]
+                    clients_classes_distr = np.random.dirichlet(np.repeat(distribution_alpha, num_clients), size=len(cur_classes)) #num_classes x num_clients
+                    classes_clients_numbers = {clas % cpt: [] for clas in cur_classes} #key = class, value = [[clients], [how_many_samples_per_client]]
+                    for clas in cur_classes:
+                        classes_clients_numbers[clas % cpt].append([c for c in range(num_clients)])
+                        classes_clients_numbers[clas % cpt].append(np.zeros((num_clients,), dtype=int))
+                    for client in range(num_clients):
+                        distr = torch.distributions.Categorical(torch.tensor(clients_classes_distr[:, client]))
+                        classes_to_sample = distr.sample((default_samples,)).numpy()
+                        for clas in classes_to_sample:
+                            #classes_clients_numbers[clas][0].append(client)
+                            #classes_clients_numbers[clas][1].append(1)
+                            classes_clients_numbers[clas % cpt][1][client] += 1
+                    #clients_selections = np.random.choice(total_samples, (num_clients, default_samples), replace=True)
+                    #for client in range(num_clients):
+                    #    unrolled_assignments_per_class[clients_selections[client]] = client
+                    #prev = 0
+                    #for clas in cur_classes:
+                    #    clients_assignments_per_class[clas % cpt] = unrolled_assignments_per_class[prev:prev + len(classes_data[clas % cpt])]
+                    for clas in cur_classes:
+                        max_value = clients_assignments_per_class[clas % cpt].shape[0]
+                        samples = np.random.choice(max_value, sum(classes_clients_numbers[clas % cpt][1]), replace=True)
+                        tmp = 0
+                        for client in range(num_clients):
+                            how_many_samples = classes_clients_numbers[clas % cpt][1][client]
+                            if how_many_samples != 0:
+                                clients_assignments_per_class[clas % cpt][samples[tmp:tmp + how_many_samples]] = client
+                                tmp += how_many_samples
+                        
+
                 while min_samples < min_samples_split:
                     task_data = [list() for _ in range(num_clients)]
                     task_targets = [list() for _ in range(num_clients)]
@@ -71,22 +111,33 @@ class BaseDataset:
 
                         assert trials != 1000
 
+                    #we assign a number of samples to each client, so that every clients sees
+                    #some samples in each task, then we use partition_mode = "distribution" to assign
+                    #the rest of the samples to the clients
+                    #if partition_mode == "extended":
+
                     for clas in cur_classes:
                         class_data = dataset.data[dataset.targets == clas]
                         class_targets = dataset.targets[dataset.targets == clas]
                         num_samples = len(class_data)
 
                         if split == "train":
-                            if partition_mode == "distribution":
+                            if partition_mode == "distribution" or partition_mode == "extended":
                                 probs = np.random.dirichlet(np.repeat(distribution_alpha, num_clients))
+                                while np.isnan(probs).sum() > 0:
+                                    probs = np.random.dirichlet(np.repeat(distribution_alpha, num_clients))
 
                             elif partition_mode == "quantity":
                                 probs = np.zeros((num_clients,))
                                 for client_idx in clients_per_class[clas]:
                                     probs[client_idx] = 1 / len(clients_per_class[clas])
 
-                            client_distr = torch.distributions.Categorical(torch.tensor(probs))
+                            probs2 = np.where(probs < 1e-20, 0, probs)
+                            probs3 = np.clip(probs2, 0, 1)
+                            client_distr = torch.distributions.Categorical(torch.tensor(probs3))
                             assigned_client = client_distr.sample((num_samples,)).numpy()
+                            if partition_mode == "extended":
+                                assigned_client = np.where(clients_assignments_per_class[clas % cpt] != -1, clients_assignments_per_class[clas % cpt], assigned_client)
                             num_samples_per_client_task.append(
                                 [(assigned_client == i).sum().item() for i in range(num_clients)]
                             )
@@ -123,6 +174,8 @@ class BaseDataset:
                 else:
                     getattr(self, f"{split}_data").append(task_data)
                     getattr(self, f"{split}_targets").append(task_targets)
+
+        print("Data split done")
 
     def get_cur_dataloaders(self, task: int):
         self.cur_train_loaders, self.cur_test_loaders = [], []

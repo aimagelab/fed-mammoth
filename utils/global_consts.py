@@ -18,4 +18,7 @@ ADDITIONAL_ARGS = {
     "wandb_entity": (str, "regaz"),
     "debug_mode": (str_to_bool, False),
     "precision": (str, "16-mixed"),
+    "participation_rate": (float, 1.0),
+    "test_local": (str_to_bool, False),
+    "validation_interval": (int, 0), # 0 means no validation
 }

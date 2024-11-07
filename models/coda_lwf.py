@@ -6,10 +6,13 @@ from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
-from networks.vit_prompt_coda import ViTZoo
+from networks.vit_powder import ViTZoo
 import os
 from utils.tools import str_to_bool
 import math
+from models.codap import CodaPrompt
+from copy import deepcopy
+from tqdm import tqdm
 
 
 class _LRScheduler(object):
@@ -72,8 +75,8 @@ class CosineSchedule(_LRScheduler):
         return [self.cosine(base_lr) for base_lr in self.base_lrs]
 
 
-@register_model("coda_prompt")
-class CodaPrompt(BaseModel):
+@register_model("coda_lwf")
+class Coda_LwF(CodaPrompt):
     def __init__(
         self,
         fabric,
@@ -88,29 +91,39 @@ class CodaPrompt(BaseModel):
         clip_grads: str_to_bool = False,
         use_scheduler: str_to_bool = False,
     ) -> None:
-        self.clip_grads = clip_grads
-        self.use_scheduler = use_scheduler
-        self.lr = lr
-        self.wd = wd_reg
-        params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
-        super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
-        self.avg_type = avg_type
-        for n, p in self.network.named_parameters():
-            if "prompt" in n or "last" in n:
-                p.requires_grad = True
-            else:
-                p.requires_grad = False
-        self.do_linear_probe = linear_probe
-        self.done_linear_probe = False
-        self.num_epochs = num_epochs
-        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        linear_probe = False
+        super().__init__(
+            fabric,
+            network,
+            device,
+            optimizer,
+            lr,
+            wd_reg,
+            avg_type,
+            linear_probe,
+            num_epochs,
+            clip_grads,
+            use_scheduler,
+        )
+        self.compute_similarities = False
         self.network : ViTZoo
+        self.scores_per_class = None
+        self.classes = None
+        self.old_network = None
+        #self.network.mark_forward_method(self.network.get_scores)
+        self.network.mark_forward_method("get_scores")
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
+            with torch.no_grad():
+                old_out = self.old_network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
             outputs = self.network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss_ce = self.loss(outputs, labels % self.cpt)
+            loss_dual_full = F.kl_div(F.log_softmax(old_out, dim=1), F.softmax(outputs, dim=1), reduction="none")
+            one_hot_labels = torch.logical_not(F.one_hot(labels % self.cpt, self.cpt)).float()
+            loss_dual = (loss_dual_full * one_hot_labels).sum(1).mean()
+            loss = loss_ce + loss_dual
 
         if update:
             self.fabric.backward(loss)
@@ -126,25 +139,12 @@ class CodaPrompt(BaseModel):
     def forward(self, x):  # used in evaluate, while observe is used in training
         return self.network(x, pen=False, train=False)
 
-    def linear_probe(self, dataloader: DataLoader):
-        for epoch in range(5):
-            for inputs, labels in dataloader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                with torch.no_grad():
-                    pre_logits = self.network(inputs, pen=True, train=False)
-                outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
-                labels = labels % self.cpt
-                loss = F.cross_entropy(outputs, labels)
-                self.optimizer.zero_grad()
-                self.fabric.backward(loss)
-                self.optimizer.step()
-
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
-        if self.cur_task > 0:
-            self.network.prompt.process_task_count()
-        if self.do_linear_probe:
-            self.done_linear_probe = False
+        self.compute_similarities = True
+
+    def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
+        return super().end_task_client(dataloader, server_info)
 
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
@@ -163,16 +163,29 @@ class CodaPrompt(BaseModel):
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
-        if self.do_linear_probe and not self.done_linear_probe:
-            optimizer = self.optimizer_class(self.network.last.parameters(), lr=1e-3, weight_decay=0)
-            self.optimizer = self.fabric.setup_optimizers(optimizer)
-            self.linear_probe(dataloader)
-            self.done_linear_probe = True
-            # restore correct optimizer
+        self.old_network = deepcopy(self.network) #latest server model
+        # restore correct optimizer
         params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
         optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
         self.optimizer = self.fabric.setup_optimizers(optimizer)
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        scores_per_class = torch.zeros((self.cpt, 10), device=self.device)
+        classes = torch.zeros(self.cpt, device=self.device)
+        if self.compute_similarities:
+            with torch.no_grad():
+                for i, (inputs, labels) in enumerate(tqdm(dataloader, desc="Computing similarities")):
+                    inputs = inputs.to(self.device)
+                    batch_scores = self.network.get_scores(inputs, pen=True, train=True)
+                    #scores = torch.cat((scores, torch.stack(batch_scores)), dim=0)
+                    labels_one_hot = torch.nn.functional.one_hot(labels % self.cpt, self.cpt).float()
+                    scores_per_class += labels_one_hot.T @ batch_scores
+                    labs, nums = torch.unique(labels, return_counts=True)
+                    classes[labs % self.cpt] += nums
+        scores_per_class /= classes.unsqueeze(1) #average prompt-selection weights (scores) per class
+        self.scores_per_class = scores_per_class
+        self.classes = classes
+        self.compute_similarities = False
+
 
     def end_epoch(self):
         if self.use_scheduler:
@@ -186,23 +199,8 @@ class CodaPrompt(BaseModel):
         }
 
     def get_server_info(self):
-        return {"params": self.network.get_params()}
+        server_info = {"params": self.network.get_params()}
+        return server_info
 
     def end_round_client(self, dataloader: DataLoader):
         pass
-
-    def save_checkpoint(self, output_folder: str, task: int, comm_round: int) -> None:
-        training_status = self.network.training
-        self.network.eval()
-
-        checkpoint = {
-            "task": task,
-            "comm_round": comm_round,
-            "network": self.network,
-            "optimizer": self.optimizer,
-        }
-        name = "coda"
-        name += "_linear_probe" if self.do_linear_probe else ""
-        name += f"_task_{task}_round_{comm_round}_checkpoint.pt"
-        self.fabric.save(os.path.join(output_folder, name), checkpoint)
-        self.network.train(training_status)

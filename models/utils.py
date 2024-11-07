@@ -78,13 +78,31 @@ class BaseModel(nn.Module):
     def end_round_client(self, dataloader: DataLoader):
         pass
 
-    def begin_round_server(self):
+    def begin_round_server(self, info: List[dict] = None):
         pass
 
     def end_round_server(self, client_info: List[dict]):
         pass
 
     def end_epoch(self):
+        pass
+
+    def end_round_validation_client(self, dataloader: DataLoader):
+        pass
+
+    def end_round_validation_server(self, dataloader: DataLoader):
+        pass
+
+    def end_task_validation_client(self, dataloader: DataLoader):
+        pass
+
+    def end_task_validation_server(self, dataloader: DataLoader):
+        pass
+
+    def warmup_task_client(self, server_info, dataloader: DataLoader):
+        pass
+
+    def warmup_task_server(self, dataloaders: List[DataLoader] = None):
         pass
 
     def get_client_info(self, dataloader: DataLoader):
