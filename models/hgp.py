@@ -176,7 +176,8 @@ class HGP(BaseModel):
                         mogs[clas][1].append(gaus_mean)
                         mogs[clas][2].append(gaus_var)
                     counter += client_gaussians[clas][0]
-            mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
+            if mogs.get(clas) is not None:
+                mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
         self.mogs_per_task[self.cur_task] = mogs
         optimizer = torch.optim.SGD(self.network.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
@@ -194,6 +195,9 @@ class HGP(BaseModel):
             # sample features from gaussians:
             for task in range(self.cur_task + 1):
                 for clas in range(self.cpt):
+                    if self.mogs_per_task[task].get([task * self.cpt + clas][0]) is None:
+                        #print("No gaussian for class ", task * self.cpt + clas)
+                        continue
                     weights_list = []
                     for weight in self.mogs_per_task[task][task * self.cpt + clas][0]:
                         weights_list.append(weight)
@@ -281,6 +285,9 @@ class HGP(BaseModel):
         return {"params": self.network.get_params()}
 
     def end_round_client(self, dataloader: DataLoader):
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+            self.optimizer = None
         features = torch.tensor([], dtype=torch.float32).to(self.device)
         true_labels = torch.tensor([], dtype=torch.int64).to(self.device)
         num_epochs = 1 if not self.full_cov else 3
