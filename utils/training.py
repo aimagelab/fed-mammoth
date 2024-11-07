@@ -11,38 +11,6 @@ from utils.status import progress_bar
 from utils.tools import get_time_str
 
 
-def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
-    correct, total = 0, 0
-    task_accuracies = []
-    training_status = model.training
-    model.eval()
-    start_class = 0
-    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
-    with torch.no_grad():
-        for t in range(task + 1):
-            task_correct, task_total = 0, 0
-            test_loaders = dataset.get_cur_dataloaders(t)[1]
-            for test_loader in test_loaders:
-                test_loader = fabric.setup_dataloaders(test_loader)
-                for inputs, labels in test_loader:
-                    outputs = model(inputs)[:, start_class:end_class]
-                    pred = torch.max(outputs, dim=1)[1]
-                    task_correct += (pred == labels).sum().item()
-                    task_total += labels.shape[0]
-                    correct += (pred == labels).sum().item()
-                    total += labels.shape[0]
-            task_accuracies.append(round(task_correct / task_total * 100, 2))
-
-    model.train(training_status)
-    print(
-        f"Mean accuracy up to task {task + 1}:",
-        round(correct / total * 100, 2),
-        "%",
-        "Task accuracies:",
-        task_accuracies,
-    )
-    res = [round(correct / total * 100, 2), task_accuracies]
-    return res
 
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     correct, total = 0, 0
@@ -97,6 +65,41 @@ def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx : 
                 correct += (pred == labels).sum().item()
                 total += labels.shape[0]
             task_accuracies.append(round(task_correct / task_total * 100, 2))
+
+    model.train(training_status)
+    print(
+        f"Mean accuracy up to task {task + 1}:",
+        round(correct / total * 100, 2),
+        "%",
+        "Task accuracies:",
+        task_accuracies,
+    )
+    res = [round(correct / total * 100, 2), task_accuracies]
+    return res
+
+def evaluate_client_transfer(fabric, task, model: BaseModel, dataset: BaseDataset, idx : int):
+    correct, total = 0, 0
+    task_accuracies = []
+    training_status = model.training
+    model.eval()
+    start_class = 0
+    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
+    with torch.no_grad():
+        for t in range(task + 1):
+            task_correct, task_total = 0, 0
+            test_loaders = dataset.get_cur_dataloaders(t)[1]
+            for i, test_loader in enumerate(test_loaders):
+                if i == idx:
+                    continue
+                test_loader = fabric.setup_dataloaders(test_loader)
+                for inputs, labels in test_loader:
+                    outputs = model(inputs)[:, start_class:end_class]
+                    pred = torch.max(outputs, dim=1)[1]
+                    task_correct += (pred == labels).sum().item()
+                    task_total += labels.shape[0]
+                    correct += (pred == labels).sum().item()
+                    total += labels.shape[0]
+                task_accuracies.append(round(task_correct / task_total * 100, 2))
 
     model.train(training_status)
     print(
@@ -203,8 +206,14 @@ def train(
                 model.end_round_client(train_loader)
                 if args["test_local"]:
                     accuracy = evaluate_client(fabric, task, model, dataset, client_idx)
+                    print(f"Client {client_idx} Local acc: {accuracy[0]}")
                     if args["wandb"]:
-                        wandb.log({"Local client acc": accuracy})
+                        wandb.log({f"Client {client_idx} Local acc": accuracy[0]})
+                if args["test_local_transfer"]:
+                    accuracy = evaluate_client_transfer(fabric, task, model, dataset, client_idx)
+                    print(f"Client {client_idx} Local Transfer acc: {accuracy[0]}")
+                    if args["wandb"]:
+                        wandb.log({f"Client {client_idx} Local Transfer acc": accuracy[0]})
                 if args["validation_interval"] > 0 and (comm_round + 1) % args["validation_interval"] == 0:
                     model.end_round_validation_client(train_loader, test_loader)
                     accuracy = evaluate(fabric, task, model, dataset)
@@ -222,7 +231,7 @@ def train(
             accuracy = evaluate(fabric, task, server_model, dataset)
             if args["wandb"]:
                 results = {
-                    "Mean_accuracy": accuracy,
+                    "Mean_accuracy": accuracy[0],
                 }
                 for i in range(len(accuracy[1])):
                     results[f"Task_{i + 1}_accuracy"] = accuracy[1][i]
@@ -259,8 +268,8 @@ def train(
 
         if args["wandb"]:
             results = {
-                "Mean_accuracy": accuracy,
-                "End of task Accuracy": accuracy,
+                "Mean_accuracy": accuracy[0],
+                "End of task Accuracy": accuracy[0],
                 # TODO: add other things here
             }
 
