@@ -56,7 +56,7 @@ class BaseDataset:
                     classes_targets = [dataset.targets[dataset.targets == clas] for clas in cur_classes]
                     unrolled_assignments_per_class = np.concatenate([np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]).flatten()
                     clients_assignments_per_class = [np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]
-                    clients_classes_distr = np.random.dirichlet(np.repeat(distribution_alpha, num_clients), size=len(cur_classes)) #num_classes x num_clients
+                    clients_classes_distr = np.random.dirichlet(np.repeat(0.05, num_clients), size=len(cur_classes)) #num_classes x num_clients
                     classes_clients_numbers = {clas % cpt: [] for clas in cur_classes} #key = class, value = [[clients], [how_many_samples_per_client]]
                     for clas in cur_classes:
                         classes_clients_numbers[clas % cpt].append([c for c in range(num_clients)])
