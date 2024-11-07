@@ -203,4 +203,7 @@ class Coda_LwF(CodaPrompt):
         return server_info
 
     def end_round_client(self, dataloader: DataLoader):
-        pass
+        self.old_network = None
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+            self.optimizer = None
