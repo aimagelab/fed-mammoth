@@ -110,6 +110,7 @@ class Coda_LwF(CodaPrompt):
         self.scores_per_class = None
         self.classes = None
         self.old_network = None
+        self.betas = None
         #self.network.mark_forward_method(self.network.get_scores)
         self.network.mark_forward_method("get_scores")
 
@@ -122,7 +123,8 @@ class Coda_LwF(CodaPrompt):
             loss_ce = self.loss(outputs, labels % self.cpt)
             loss_dual_full = F.kl_div(F.log_softmax(old_out, dim=1), F.softmax(outputs, dim=1), reduction="none")
             one_hot_labels = torch.logical_not(F.one_hot(labels % self.cpt, self.cpt)).float()
-            loss_dual = (loss_dual_full * one_hot_labels).sum(1).mean()
+            beta = (self.betas.unsqueeze(1) @ one_hot_labels.T).flatten()
+            loss_dual = ((loss_dual_full * one_hot_labels).sum(1) * beta).mean()
             loss = loss_ce + loss_dual
 
         if update:
@@ -183,6 +185,7 @@ class Coda_LwF(CodaPrompt):
                     classes[labs % self.cpt] += nums
         scores_per_class /= classes.unsqueeze(1) #average prompt-selection weights (scores) per class
         self.scores_per_class = scores_per_class
+        self.betas = torch.exp(scores_per_class.sum(1)) / torch.exp(scores_per_class).sum()
         self.classes = classes
         self.compute_similarities = False
 
