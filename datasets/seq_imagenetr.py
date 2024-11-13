@@ -88,6 +88,7 @@ class MyImageNetR(Dataset):
 class SequentialImageNetR(BaseDataset):
     N_TASKS = 10
     N_CLASSES_PER_TASK = 20
+
     normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 
     TRAIN_TRANSFORM = transforms.Compose(
@@ -145,6 +146,7 @@ class SequentialImageNetR(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
 
 @register_dataset("joint-imagenetr")
 class JointImagenetR(SequentialImageNetR):

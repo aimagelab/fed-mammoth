@@ -11,14 +11,16 @@ from utils.status import progress_bar
 from utils.tools import get_time_str
 
 
-
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     correct, total = 0, 0
     task_accuracies = []
     training_status = model.training
     model.eval()
     start_class = 0
-    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
+    if isinstance(dataset.N_CLASSES_PER_TASK, list):
+        end_class = sum(dataset.N_CLASSES_PER_TASK[: task + 1])
+    else:
+        end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
@@ -45,13 +47,17 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     res = [round(correct / total * 100, 2), task_accuracies]
     return res
 
-def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx : int):
+
+def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx: int):
     correct, total = 0, 0
     task_accuracies = []
     training_status = model.training
     model.eval()
     start_class = 0
-    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
+    if isinstance(dataset.N_CLASSES_PER_TASK, list):
+        end_class = sum(dataset.N_CLASSES_PER_TASK[: task + 1])
+    else:
+        end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
@@ -77,13 +83,17 @@ def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx : 
     res = [round(correct / total * 100, 2), task_accuracies]
     return res
 
-def evaluate_client_transfer(fabric, task, model: BaseModel, dataset: BaseDataset, idx : int):
+
+def evaluate_client_transfer(fabric, task, model: BaseModel, dataset: BaseDataset, idx: int):
     correct, total = 0, 0
     task_accuracies = []
     training_status = model.training
     model.eval()
     start_class = 0
-    end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
+    if isinstance(dataset.N_CLASSES_PER_TASK, list):
+        end_class = sum(dataset.N_CLASSES_PER_TASK[: task + 1])
+    else:
+        end_class = (task + 1) * dataset.N_CLASSES_PER_TASK
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
@@ -147,26 +157,34 @@ def train(
             continue
         train_loaders, test_loaders = dataset.get_cur_dataloaders(task)  # TODO: test_loaders are not used
         last_task_time = time()
-        server_model.begin_task(dataset.N_CLASSES_PER_TASK)
-        #server_model.warmup_task_server(train_loaders)
-        #server_info_warmup = server_model.get_server_info()
-        #client_info_warmup = []
-        active_clients_sampled = torch.randperm(args["num_clients"])[: int(args["num_clients"] * args["participation_rate"])]
+        if isinstance(dataset.N_CLASSES_PER_TASK, list):
+            server_model.begin_task(dataset.N_CLASSES_PER_TASK[task])
+        else:
+            server_model.begin_task(dataset.N_CLASSES_PER_TASK)
+        # server_model.warmup_task_server(train_loaders)
+        # server_info_warmup = server_model.get_server_info()
+        # client_info_warmup = []
+        active_clients_sampled = torch.randperm(args["num_clients"])[
+            : int(args["num_clients"] * args["participation_rate"])
+        ]
         active_clients_sampled = (active_clients_sampled[torch.argsort(active_clients_sampled)]).tolist()
         for index, client_model in zip(active_clients_sampled, client_models):
-            client_model.begin_task(dataset.N_CLASSES_PER_TASK)
+            if isinstance(dataset.N_CLASSES_PER_TASK, list):
+                client_model.begin_task(dataset.N_CLASSES_PER_TASK[task])
+            else:
+                client_model.begin_task(dataset.N_CLASSES_PER_TASK)
             train_loader = train_loaders[index]
             train_loader = fabric.setup_dataloaders(train_loader)
-            #client_info_warmup.append(client_model.warmup_task_client(server_info_warmup, train_loader))
+            # client_info_warmup.append(client_model.warmup_task_client(server_info_warmup, train_loader))
         for comm_round in range(args["num_comm_rounds"]):
-            #server_model.begin_round_server(client_info_warmup)
+            # server_model.begin_round_server(client_info_warmup)
             server_model.begin_round_server()
             server_info = server_model.get_server_info()
             if comm_round < start_comm_round:
                 continue
             clients_info = []
             last_round_time = time()
-            #when participation_rate is 1, all clients are active, so idx and client_idx are the same
+            # when participation_rate is 1, all clients are active, so idx and client_idx are the same
             for idx, client_idx in enumerate(active_clients_sampled):
                 train_loader = train_loaders[client_idx]
                 test_loader = test_loaders[client_idx]
@@ -236,16 +254,16 @@ def train(
                 for i in range(len(accuracy[1])):
                     results[f"Task_{i + 1}_accuracy"] = accuracy[1][i]
                 wandb.log(results)
-            if ((epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"]) and not args[
-                "debug_mode"
-            ]) and args["save_models"]:
+            if (
+                (epoch % args["checkpoint_interval"] == 0 or (comm_round + 1) == args["num_comm_rounds"])
+                and not args["debug_mode"]
+            ) and args["save_models"]:
                 server_model.save_checkpoint(output_folder, task, comm_round)
             torch.cuda.empty_cache()
             if args["validation_interval"] > 0 and (comm_round + 1) % args["validation_interval"] == 0:
                 server_model.end_round_validation_server(train_loader, test_loader)
                 print("Evaluation after round:")
                 accuracy = evaluate(fabric, task, server_model, dataset)
-                
 
         client_info = []
         server_info = server_model.get_server_info()

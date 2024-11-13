@@ -51,13 +51,23 @@ class BaseDataset:
                     base_class = task * self.N_CLASSES_PER_TASK
                     cur_classes = np.arange(base_class, base_class + self.N_CLASSES_PER_TASK)
                     cpt = self.N_CLASSES_PER_TASK
-                    total_samples = np.stack([dataset.data[dataset.targets == clas].shape[0] for clas in cur_classes]).sum()
+                    total_samples = np.stack(
+                        [dataset.data[dataset.targets == clas].shape[0] for clas in cur_classes]
+                    ).sum()
                     classes_data = [dataset.data[dataset.targets == clas] for clas in cur_classes]
                     classes_targets = [dataset.targets[dataset.targets == clas] for clas in cur_classes]
-                    unrolled_assignments_per_class = np.concatenate([np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]).flatten()
-                    clients_assignments_per_class = [np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]
-                    clients_classes_distr = np.random.dirichlet(np.repeat(0.05, num_clients), size=len(cur_classes)) #num_classes x num_clients
-                    classes_clients_numbers = {clas % cpt: [] for clas in cur_classes} #key = class, value = [[clients], [how_many_samples_per_client]]
+                    unrolled_assignments_per_class = np.concatenate(
+                        [np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes]
+                    ).flatten()
+                    clients_assignments_per_class = [
+                        np.ones(len(classes_data[clas % cpt]), dtype=int) * (-1) for clas in cur_classes
+                    ]
+                    clients_classes_distr = np.random.dirichlet(
+                        np.repeat(0.05, num_clients), size=len(cur_classes)
+                    )  # num_classes x num_clients
+                    classes_clients_numbers = {
+                        clas % cpt: [] for clas in cur_classes
+                    }  # key = class, value = [[clients], [how_many_samples_per_client]]
                     for clas in cur_classes:
                         classes_clients_numbers[clas % cpt].append([c for c in range(num_clients)])
                         classes_clients_numbers[clas % cpt].append(np.zeros((num_clients,), dtype=int))
@@ -65,14 +75,14 @@ class BaseDataset:
                         distr = torch.distributions.Categorical(torch.tensor(clients_classes_distr[:, client]))
                         classes_to_sample = distr.sample((default_samples,)).numpy()
                         for clas in classes_to_sample:
-                            #classes_clients_numbers[clas][0].append(client)
-                            #classes_clients_numbers[clas][1].append(1)
+                            # classes_clients_numbers[clas][0].append(client)
+                            # classes_clients_numbers[clas][1].append(1)
                             classes_clients_numbers[clas % cpt][1][client] += 1
-                    #clients_selections = np.random.choice(total_samples, (num_clients, default_samples), replace=True)
-                    #for client in range(num_clients):
+                    # clients_selections = np.random.choice(total_samples, (num_clients, default_samples), replace=True)
+                    # for client in range(num_clients):
                     #    unrolled_assignments_per_class[clients_selections[client]] = client
-                    #prev = 0
-                    #for clas in cur_classes:
+                    # prev = 0
+                    # for clas in cur_classes:
                     #    clients_assignments_per_class[clas % cpt] = unrolled_assignments_per_class[prev:prev + len(classes_data[clas % cpt])]
                     for clas in cur_classes:
                         max_value = clients_assignments_per_class[clas % cpt].shape[0]
@@ -81,15 +91,21 @@ class BaseDataset:
                         for client in range(num_clients):
                             how_many_samples = classes_clients_numbers[clas % cpt][1][client]
                             if how_many_samples != 0:
-                                clients_assignments_per_class[clas % cpt][samples[tmp:tmp + how_many_samples]] = client
+                                clients_assignments_per_class[clas % cpt][
+                                    samples[tmp : tmp + how_many_samples]
+                                ] = client
                                 tmp += how_many_samples
-                        
 
                 while min_samples < min_samples_split:
                     task_data = [list() for _ in range(num_clients)]
                     task_targets = [list() for _ in range(num_clients)]
-                    base_class = task * self.N_CLASSES_PER_TASK
-                    cur_classes = np.arange(base_class, base_class + self.N_CLASSES_PER_TASK)
+                    if isinstance(self.N_CLASSES_PER_TASK, list):
+                        base_class = sum(self.N_CLASSES_PER_TASK[:task])
+                        cur_classes = np.arange(base_class, base_class + self.N_CLASSES_PER_TASK[task])
+                    else:
+                        base_class = task * self.N_CLASSES_PER_TASK
+                        cur_classes = np.arange(base_class, base_class + self.N_CLASSES_PER_TASK)
+
                     num_samples_per_client_task = []
 
                     iterations += 1
@@ -111,10 +127,10 @@ class BaseDataset:
 
                         assert trials != 1000
 
-                    #we assign a number of samples to each client, so that every clients sees
-                    #some samples in each task, then we use partition_mode = "distribution" to assign
-                    #the rest of the samples to the clients
-                    #if partition_mode == "extended":
+                    # we assign a number of samples to each client, so that every clients sees
+                    # some samples in each task, then we use partition_mode = "distribution" to assign
+                    # the rest of the samples to the clients
+                    # if partition_mode == "extended":
 
                     for clas in cur_classes:
                         class_data = dataset.data[dataset.targets == clas]
@@ -137,7 +153,11 @@ class BaseDataset:
                             client_distr = torch.distributions.Categorical(torch.tensor(probs3))
                             assigned_client = client_distr.sample((num_samples,)).numpy()
                             if partition_mode == "extended":
-                                assigned_client = np.where(clients_assignments_per_class[clas % cpt] != -1, clients_assignments_per_class[clas % cpt], assigned_client)
+                                assigned_client = np.where(
+                                    clients_assignments_per_class[clas % cpt] != -1,
+                                    clients_assignments_per_class[clas % cpt],
+                                    assigned_client,
+                                )
                             num_samples_per_client_task.append(
                                 [(assigned_client == i).sum().item() for i in range(num_clients)]
                             )
