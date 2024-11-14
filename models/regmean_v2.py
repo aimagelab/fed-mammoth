@@ -15,6 +15,11 @@ import shutil
 
 from tqdm import tqdm
 
+from datasets import dataset_factory
+from inspect import signature
+
+from utils.training import evaluate
+
 
 def extract_block_number_from_module_name(module_name):
     if "head" in module_name:
@@ -47,6 +52,9 @@ class RegMean_v2(RegMean):
         batch_size: int = 32,
         gram_fraction: float = 1.0,
         linear_probe_epochs: int = 0,
+        test_lp_after_each_round: str_to_bool = False,
+        lp_dataset: str = "same",
+        args: dict = None,
     ) -> None:
         gram_fraction = min(1.0, max(0.0, gram_fraction))
         self.gram_fraction = gram_fraction
@@ -82,6 +90,9 @@ class RegMean_v2(RegMean):
                     p.requires_grad = False
         self.classifier = None
         self.linear_probe_epochs = linear_probe_epochs
+        self.test_lp = test_lp_after_each_round
+        self.lp_dataset = lp_dataset
+        self.checked_validation = False
 
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -277,27 +288,15 @@ class RegMean_v2(RegMean):
                 c_sd = client.network.state_dict()
                 c_sd[key] = sd[key]
                 client.network.load_state_dict(c_sd)
-        #self.network.state_dict()[key] = sd[key]
-        #for key in merging_keys:
-        #    if (
-        #        "weight" in key and self.middle_names.get(key) is not None
-        #    ):  # it means that we apply regmean to this layer
-        #        name = self.middle_names[key]
-        #        sd[key] = (
-        #            torch.stack(
-        #                [
-        #                    client["state_dict"][key].to(dtype) @ client["grams"][name].to(dtype)
-        #                    for client in client_info
-        #                ]
-        #            ).sum(0)
-        #            @ torch.pinverse(torch.stack([client["grams"][name].to(dtype) for client in client_info]).sum(0))
-        #        ).to(torch.float32)
-        #    else: # if merging_keys == keys, we apply fedavg to the other layers, otherwise we never enter this "else" statement
-        #        sd[key] = torch.stack(
-        #            [client["state_dict"][key] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
-        #        ).sum(
-        #            0
-        #        )  # fedavg for the other layers
+        if self.linear_probe_epochs > 0 and self.test_lp:
+            self.do_linear_probe([client["dl"] for client in client_info])
+            print("Linear probe done.")
+            print("Evaluating after linear probe...")
+        #if not self.checked_validation:
+        #    if self.linear_probe_epochs > 0 and self.lp_dataset != "same":
+        #        DatasetClass = dataset_factory(self.lp_dataset)
+        #        dataset_signature = list(signature(DatasetClass.__init__).parameters.keys())[1:]
+        #        dataset = DatasetClass()
 
     def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
         return dataloader
@@ -305,6 +304,10 @@ class RegMean_v2(RegMean):
     def end_task_server(self, client_info: List[dict] = None):
         if self.linear_probe_epochs == 0:
             return
+        return self.do_linear_probe([client["dl"] for client in client_info])
+        
+
+    def do_linear_probe(self, data_loaders: List[DataLoader]):
         self.network.train()
         features = []
         labels_ = []
@@ -313,7 +316,7 @@ class RegMean_v2(RegMean):
         self.classifier = nn.Linear(embed_dim, num_classes).to(self.device)
         nn.init.xavier_normal_(self.classifier.weight)
         torch.cuda.empty_cache()
-        for dl in client_info:
+        for dl in data_loaders:
             for i, (inputs, labels) in enumerate(dl):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 with self.fabric.autocast(), torch.no_grad():
@@ -336,3 +339,4 @@ class RegMean_v2(RegMean):
                 loss.backward()
                 optimizer.step()
         self.network.eval()
+        return None

@@ -132,3 +132,70 @@ class SequentialCub200(BaseDataset):
 class JointISIC(SequentialCub200):
     N_CLASSES_PER_TASK = 200
     N_TASKS = 1
+
+
+@register_dataset("seq-cub200_angel")
+class SequentialCub200Angel(BaseDataset):
+    SETTING = 'class-il'
+    N_CLASSES_PER_TASK = 20
+    N_TASKS = 10
+    SIZE = (MyCUB200.IMG_SIZE, MyCUB200.IMG_SIZE)
+    MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+
+    TRAIN_TRANSFORM = transforms.Compose([
+        transforms.Resize((300, 300), interpolation=InterpolationMode.BICUBIC),
+        transforms.RandomCrop(SIZE),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(MEAN, STD)])
+    NOT_AUG_TRANSFORM = transforms.Compose([transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
+                                        #  transforms.CenterCrop(MyCUB200.IMG_SIZE),
+                                         transforms.ToTensor()])
+                                        #  transforms.Normalize(MEAN, STD)])
+    TEST_TRANSFORM = transforms.Compose([transforms.Resize(300, interpolation=InterpolationMode.BICUBIC),
+                                         transforms.CenterCrop(MyCUB200.IMG_SIZE),
+                                         transforms.ToTensor(),
+                                         transforms.Normalize(MEAN, STD)])
+
+    INPUT_SHAPE = (224, 224, 3)
+
+    def __init__(
+        self,
+        num_clients: int,
+        batch_size: int,
+        partition_mode: str = "distribution",
+        distribution_alpha: float = 0.5,
+        class_quantity: int = 1,
+    ):
+        super().__init__(
+            num_clients,
+            batch_size,
+            partition_mode,
+            distribution_alpha,
+            class_quantity,
+        )
+
+        for split in ["train", "test"]:
+            dataset = MyCUB200(
+                DATASET_PATH,
+                train=True if split == "train" else False,
+                download=True,
+                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+            )
+            setattr(self, f"{split}_dataset", dataset)
+
+        self._split_fcil(
+            num_clients,
+            partition_mode,
+            distribution_alpha,
+            class_quantity,
+        )
+
+        for split in ["train", "test"]:
+            getattr(self, f"{split}_dataset").data = None
+            getattr(self, f"{split}_dataset").targets = None
+
+@register_dataset("joint-cub200_angel")
+class JointISICAngel(SequentialCub200Angel):
+    N_CLASSES_PER_TASK = 200
+    N_TASKS = 1

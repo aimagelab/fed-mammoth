@@ -123,7 +123,7 @@ class Coda_LwF(CodaPrompt):
             loss_ce = self.loss(outputs, labels % self.cpt)
             loss_dual_full = F.kl_div(F.log_softmax(old_out, dim=1), F.softmax(outputs, dim=1), reduction="none")
             one_hot_labels = torch.logical_not(F.one_hot(labels % self.cpt, self.cpt)).float()
-            beta = (self.betas.unsqueeze(1) @ one_hot_labels.T).flatten()
+            beta = (self.betas.unsqueeze(0) @ one_hot_labels.T).flatten()
             loss_dual = ((loss_dual_full * one_hot_labels).sum(1) * beta).mean()
             loss = loss_ce + loss_dual
 
@@ -173,6 +173,7 @@ class Coda_LwF(CodaPrompt):
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
         scores_per_class = torch.zeros((self.cpt, 10), device=self.device)
         classes = torch.zeros(self.cpt, device=self.device)
+        eps = 1e-20
         if self.compute_similarities:
             with torch.no_grad():
                 for i, (inputs, labels) in enumerate(tqdm(dataloader, desc="Computing similarities")):
@@ -183,11 +184,13 @@ class Coda_LwF(CodaPrompt):
                     scores_per_class += labels_one_hot.T @ batch_scores
                     labs, nums = torch.unique(labels, return_counts=True)
                     classes[labs % self.cpt] += nums
-        scores_per_class /= classes.unsqueeze(1) #average prompt-selection weights (scores) per class
-        self.scores_per_class = scores_per_class
-        self.betas = torch.exp(scores_per_class.sum(1)) / torch.exp(scores_per_class).sum()
-        self.classes = classes
-        self.compute_similarities = False
+            scores_per_class = (scores_per_class) / (classes.unsqueeze(1) + eps) #average prompt-selection weights (scores) per class
+            self.scores_per_class = deepcopy(scores_per_class)
+            not_classes = classes == 0
+            scores_per_class[not_classes] = torch.Tensor([-float('Inf')]).to(self.device)
+            self.betas = torch.exp(scores_per_class.sum(1)) / torch.exp(scores_per_class.sum(1)).sum()
+            self.classes = classes
+            self.compute_similarities = False
 
 
     def end_epoch(self):
