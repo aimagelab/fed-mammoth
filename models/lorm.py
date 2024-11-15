@@ -95,11 +95,11 @@ class LoRM(Lora, RegMean):
         self.set_train_matrix()
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         lr_back = []
-        if lr_B > 0:
+        if lr_B >= 0:
             lr_back.append(lr_B)
         else:
             lr_back.append(lr)
-        if lr_A > 0:
+        if lr_A >= 0:
             lr_back.append(lr_A)
         else:
             lr_back.append(lr)
