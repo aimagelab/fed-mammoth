@@ -162,7 +162,11 @@ class BaseDataset:
                                 [(assigned_client == i).sum().item() for i in range(num_clients)]
                             )
                         else:
-                            train_test_ratio = sum(num_samples_per_client[clas]) / num_samples
+                            if max(num_samples_per_client[clas]) < sum(num_samples_per_client[clas]) / num_samples:
+                                train_test_ratio = 1
+                            else:
+                                train_test_ratio = sum(num_samples_per_client[clas]) / num_samples
+
                             num_samples_per_client[clas] = [
                                 int(round(num_samples_per_client[clas][client_idx] / train_test_ratio))
                                 for client_idx in range(num_clients)
