@@ -934,7 +934,7 @@ def checkpoint_filter_fn(state_dict, model, adapt_layer_scale=False):
 
 
 
-@register_network("vit_prompt_dual2")
+@register_network("vit_prompt_dual")
 class VitDual(BaseNetwork):
     def __init__(self, 
                  model_name: str = "vit_base_patch16_224.augreg_in21k", 
