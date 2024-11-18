@@ -6,7 +6,7 @@ from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
-from networks.vit_prompt_dual2 import VitDual
+from networks.vit_prompt_dual import VitDual
 import os
 from utils.tools import str_to_bool
 import math
