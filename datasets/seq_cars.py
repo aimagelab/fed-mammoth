@@ -11,7 +11,7 @@ from torchvision.transforms.functional import InterpolationMode
 try:
     import deeplake
 except ImportError:
-    raise NotImplementedError("Deeplake not installed. Please install with `pip install deeplake` to use this dataset.")
+    raise NotImplementedError("Deeplake not installed. Please install with `pip install \"deeplake<4\"` to use this dataset.")
 
 from datasets import register_dataset
 from datasets.utils import BaseDataset
