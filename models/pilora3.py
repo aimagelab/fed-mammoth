@@ -179,7 +179,9 @@ class PiLora(BaseModel):
             labs, nums = torch.unique(labels, return_counts=True)
             self.classes[labs % self.cpt] += nums
             loss = 0
-            protos = torch.cat([self.class_protos[t][i] for t in range(self.num_tasks) for i in range(self.cpt)])
+            # protos = torch.cat([self.class_protos[t][i] for t in range(self.num_tasks) for i in range(self.cpt)])
+            # temporal fix to make it work with cars, will need a better fix later on, but it works for now
+            protos = torch.cat([self.class_protos[t][i] for t in range(self.num_tasks) for i in range(len(self.class_protos[t]) if t < self.num_tasks - 1 else self.cpt)])
             distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
             distances /= 768
             distances = distances.sqrt()
