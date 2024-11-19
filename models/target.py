@@ -607,6 +607,8 @@ class Target(FedAvg):
             self.dataset_size = 30000
         elif "eurosat" in dataset:
             self.dataset_size = 27000
+        else:
+            self.dataset_size = 8000
         self.nums = nums
         self.total_classes = []
         self.syn_data_loader = None
