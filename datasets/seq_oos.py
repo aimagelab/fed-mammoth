@@ -5,8 +5,6 @@ import io
 from torch.utils.data import Dataset
 import pandas as pd
 import json
-from PIL import Image
-import numpy as np
 from transformers import T5Tokenizer
 
 from datasets import register_dataset
@@ -14,14 +12,11 @@ from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 
 
-
-
 class MyOOS(Dataset):
     def __init__(self, root: str, train: bool = True, tokenizer: T5Tokenizer = None, download: bool = True) -> None:
         self.root = root
         self.train = train
         self.tokenizer = tokenizer
-
 
         if not os.path.exists(self.root + "/OOS") and download:
             print("Downloading OOS...", file=sys.stderr)
@@ -33,14 +28,12 @@ class MyOOS(Dataset):
 
             print("Done", file=sys.stderr)
 
-
         self.data_split = pd.DataFrame(
             json.load(open(self.root + "/OOS/oos.json", "r"))["train" if self.train == True else "test"]
         )
 
         self.data = self.data_split[0].values
         self.targets = self.data_split[1].values
-
 
     def __len__(self):
         return len(self.targets)
@@ -58,11 +51,23 @@ class SequentialOOS(BaseDataset):
 
     tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
-    def __init__(self, num_clients: int, batch_size: int, partition_mode: str= "distribution", distribution_alpha: float = 0.5, class_quantity: int = 1):
+    def __init__(
+        self,
+        num_clients: int,
+        batch_size: int,
+        partition_mode: str = "distribution",
+        distribution_alpha: float = 0.5,
+        class_quantity: int = 1,
+    ):
         super().__init__(num_clients, batch_size, partition_mode, distribution_alpha, class_quantity)
 
-        for split in ["train", 'test']:
-            dataset = MyOOS(DATASET_PATH, train=True if split == "train" else False, tokenizer=getattr(self, "tokenizer"), download=True)
+        for split in ["train", "test"]:
+            dataset = MyOOS(
+                DATASET_PATH,
+                train=True if split == "train" else False,
+                tokenizer=getattr(self, "tokenizer"),
+                download=True,
+            )
             setattr(self, f"{split}_dataset", dataset)
 
         self._split_fcil(num_clients, partition_mode, distribution_alpha, class_quantity)

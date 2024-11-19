@@ -9,27 +9,31 @@
 
 ## Datasets
 
+### Visual
+
 + Sequential MNIST
 + Sequential CIFAR-10
 + Sequential CIFAR-100
 + Sequential Tiny-ImageNet
-+ Sequential EuroSAT
 + Sequential ImageNetR
++ Sequential ImageNetA
++ Sequential Cub
++ Sequential Cars
++ Sequential EuroSAT
++ Sequential ISIC
+
+### Text
+
++ Sequential OOS
 
 ## Models
 
 + FedAvg
 + HGP
-+ Many more TODOs
++ LoRM
++ Many more to add...
 
 ## Some TODOs
 
-+ ~~Add wandb~~
-+ ~~Add more datasets (e.g., cifar-10, eurosat, tiny-imagenet)~~
-+ Add LoRA
-+ Add VeRA
-+ Add RegMean base approach (i.e., applied to all linear layers, not just the head)
-+ Do those 4/5 approaches that we wrote down a while ago
 + Augmentations for all datasets
 + Add the possibility to select a learning rate scheduler
-+ Manage cases in which a client has no data for a given task and the dataloader is empty
