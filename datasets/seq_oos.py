@@ -1,15 +1,17 @@
 import os
 import sys
 import requests
-import io
 from torch.utils.data import Dataset
 import pandas as pd
 import json
 from transformers import T5Tokenizer
+import numpy as np
 
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+
+
 
 
 class MyOOS(Dataset):
@@ -17,6 +19,7 @@ class MyOOS(Dataset):
         self.root = root
         self.train = train
         self.tokenizer = tokenizer
+
 
         if not os.path.exists(self.root + "/OOS") and download:
             print("Downloading OOS...", file=sys.stderr)
@@ -28,12 +31,18 @@ class MyOOS(Dataset):
 
             print("Done", file=sys.stderr)
 
-        self.data_split = pd.DataFrame(
-            json.load(open(self.root + "/OOS/oos.json", "r"))["train" if self.train == True else "test"]
-        )
 
-        self.data = self.data_split[0].values
-        self.targets = self.data_split[1].values
+        #self.data_split = pd.DataFrame(json.load(open(self.root + "/OOS/oos.json", "r"))["train" if self.train == True else "test"]) #TODO non capisco come mai il modulo json rogna. Intanto per risolvere altre cose uso un altro path
+        self.data_split = pd.DataFrame(json.load(open("C:\Riccardo\Dottorato\DL practice\lettura dataset\dataset\oos\oos.json", "r"))["train" if self.train == True else "test"])
+
+        texts = self.data_split.iloc[:, 0].tolist() # converte i dati in una lista di stringhe da passare al tokenizer
+        labels = self.data_split.iloc[:, 1].tolist()
+        label_mapping = {label: idx for idx, label in enumerate(sorted(set(labels)))} # converte le label testuali in label numeriche necessarie per la testa di classificazione di T5
+
+
+        self.data = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+        self.targets = np.array([label_mapping[label] for label in labels], dtype=np.int64)
+
 
     def __len__(self):
         return len(self.targets)
@@ -51,26 +60,16 @@ class SequentialOOS(BaseDataset):
 
     tokenizer = T5Tokenizer.from_pretrained("t5-small")
 
-    def __init__(
-        self,
-        num_clients: int,
-        batch_size: int,
-        partition_mode: str = "distribution",
-        distribution_alpha: float = 0.5,
-        class_quantity: int = 1,
-    ):
+    INPUT_SHAPE = (49)
+
+    def __init__(self, num_clients: int, batch_size: int, partition_mode: str= "distribution", distribution_alpha: float = 0.5, class_quantity: int = 1):
         super().__init__(num_clients, batch_size, partition_mode, distribution_alpha, class_quantity)
 
-        for split in ["train", "test"]:
-            dataset = MyOOS(
-                DATASET_PATH,
-                train=True if split == "train" else False,
-                tokenizer=getattr(self, "tokenizer"),
-                download=True,
-            )
+        for split in ["train", 'test']:
+            dataset = MyOOS(DATASET_PATH, train=True if split == "train" else False, tokenizer=getattr(self, "tokenizer"), download=True)
             setattr(self, f"{split}_dataset", dataset)
 
-        self._split_fcil(num_clients, partition_mode, distribution_alpha, class_quantity)
+        self._split_fcil_OOS(num_clients, partition_mode, distribution_alpha, class_quantity)
 
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
