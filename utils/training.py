@@ -197,13 +197,17 @@ def train(
                 model.to(model.device)
                 model.begin_round_client(train_loader, server_info)
                 for epoch in range(args["num_epochs"]):
+                    last_value = None
                     for i, (inputs, labels) in enumerate(train_loader):
                         train_loss = model.observe(inputs, labels)
                         t_loss = train_loss
                         if type(train_loss) == dict:
                             t_loss = train_loss[list(train_loss.keys())[0]]
-                        elif type(train_loss) == list:
+                        elif type(train_loss) == list or type(train_loss) == tuple or type(train_loss) == set:
                             t_loss = train_loss[0]
+                            last_value = train_loss[-1]
+                        if last_value is not None and type(last_value) == str and last_value == "break":
+                            break
                         assert not torch.isnan(
                             torch.tensor(t_loss)
                         ), f"Loss is NaN at task {task}, round{comm_round}, client {client_idx} and epoch {epoch}."

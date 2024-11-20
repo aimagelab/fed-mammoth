@@ -126,6 +126,30 @@ class SequentialCifar100_regmean(SequentialCifar100_224):
     TEST_TRANSFORM = transforms.Compose([transforms.Resize(224, interpolation=3), transforms.ToTensor(), normalize])
 
 
+@register_dataset("seq-cifar100_224_ranpac")
+class SequentialCifar100_ranpac(SequentialCifar100_224):
+    SIZE = (224, 224)
+    MEAN_NORM = [0, 0, 0]
+    STD_NORM = [1, 1, 1]
+    TRAIN_TRANSFORM = transforms.Compose(
+        [
+            transforms.RandomResizedCrop(size=SIZE, scale=(0.05, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=MEAN_NORM, std=STD_NORM),
+        ]
+    )
+    TEST_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(size=SIZE, interpolation=3),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=MEAN_NORM, std=STD_NORM),
+        ]
+    )
+
+
+
 @register_dataset("joint-cifar100")
 class JointCifar100(SequentialCifar100):
     N_CLASSES_PER_TASK = 100
