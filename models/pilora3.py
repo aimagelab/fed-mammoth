@@ -329,7 +329,8 @@ class PiLora(BaseModel):
             b_v.weight = nn.Parameter(linear_b_v_weights)
             self.network.model.blocks[0].attn.qkv = blk
             eps = 1e-10
-            for num_c, c in enumerate(total_classes):
+            for c in total_classes:
+                num_c = c % self.cpt
                 feats = torch.tensor([], device=self.device)
                 for client in client_info:
                     if c in client["classes"]:
