@@ -91,8 +91,8 @@ class RanPAC(BaseModel):
         pars = []
         self.old_params = []
         self.names = []
-        self.Q = copy.deepcopy(server_info["Q"])
-        self.G = copy.deepcopy(server_info["G"])
+        #self.Q = copy.deepcopy(server_info["Q"])
+        #self.G = copy.deepcopy(server_info["G"])
         self.network._network.fc.weight.data = copy.deepcopy(server_info["Wo"])
         if getattr(self.network._network.fc, "W_rand", None) is not None:
             self.network._network.fc.W_rand = copy.deepcopy(server_info["W_rand"])
@@ -221,8 +221,8 @@ class RanPAC(BaseModel):
                     if n in self.network._network.params_to_optimize:
                         p.data = torch.stack([client["backbone_params"][i] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
                         i += 1
-            self.Q = torch.stack([client["Q"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
-            self.G = torch.stack([client["G"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+            # self.Q = torch.stack([client["Q"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+            # self.G = torch.stack([client["G"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
             self.network._network.fc.weight.data = torch.stack([client["Wo"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
 
     def setup_RP(self):
@@ -295,8 +295,8 @@ class RanPAC(BaseModel):
         return {
             "Wo": Wo,
             "backbone_params": backbone_params,
-            "Q": self.Q,
-            "G": self.G,
+            #"Q": self.Q,
+            #"G": self.G,
             "num_train_samples": len(dataloader.dataset.data),
         }
 
@@ -313,8 +313,8 @@ class RanPAC(BaseModel):
                     backbone_params.append(p.data)
         return {
             "Wo": Wo,
-            "Q": self.Q,
-            "G": self.G,
+            #"Q": self.Q,
+            #"G": self.G,
             "W_rand": W_rand,
             "backbone_params": backbone_params,
         }
