@@ -9,6 +9,7 @@ from utils.global_consts import LOG_LOSS_INTERVAL
 from models.utils import BaseModel
 from utils.status import progress_bar
 from utils.tools import get_time_str
+from datasets.seq_oos import SequentialOOS
 
 
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
@@ -24,7 +25,11 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
-            test_loaders = dataset.get_cur_dataloaders(t)[1]
+            if isinstance(dataset, SequentialOOS):
+                test_loaders = dataset.get_cur_dataloaders_oos(t)[1]
+            else:
+                test_loaders = dataset.get_cur_dataloaders(t)[1]
+            # test_loaders = dataset.get_cur_dataloaders(t)[1]
             for test_loader in test_loaders:
                 test_loader = fabric.setup_dataloaders(test_loader)
                 for inputs, labels in test_loader:

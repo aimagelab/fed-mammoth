@@ -9,6 +9,7 @@ from networks.vit import VisionTransformer as Vit
 from torch.func import functional_call
 from copy import deepcopy
 from utils.tools import str_to_bool
+from transformers import AutoModelForSequenceClassification, T5ForSequenceClassification, T5Model
 
 import math
 from typing import Optional, List
@@ -309,7 +310,11 @@ class Lora(BaseModel):
                 self.old_delta[key] = self.old_delta[key].detach()
             server_info["old_delta"] = self.old_delta
         if not self.lora_head:
-            server_info["head"] = deepcopy(self.network.model.head.state_dict())
+            if isinstance(self.network.module.model, T5Model):
+                server_info["head"] = deepcopy(self.network.head.state_dict())
+                # TODO non sono sicuro della correttezza di questa cosa
+            else:
+                server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info
 
     def end_round_client(self, dataloader: DataLoader):
