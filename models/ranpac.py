@@ -79,6 +79,11 @@ class RanPAC(BaseModel):
                 self.network._network.params_to_optimize.append(n)
             self.scheduler = self.get_scheduler()
             self.optimizer.zero_grad()
+        else:
+            self.old_Q = copy.deepcopy(self.Q)
+            self.old_G = copy.deepcopy(self.G)
+            self.Q = torch.zeros_like(self.old_Q)
+            self.G = torch.zeros_like(self.old_G)
 
     def compare_params(self,):
         for n, p in self.network._network.convnet.named_parameters():
@@ -131,6 +136,9 @@ class RanPAC(BaseModel):
 
     def end_round_client(self, dataloader: DataLoader):
         self.cur_round += 1
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+            self.optimizer = None
         if self.cur_task > 0:
             self.replace_fc(dataloader)
 
@@ -240,6 +248,8 @@ class RanPAC(BaseModel):
 
         self.Q = torch.zeros(M, self.num_classes)
         self.G = torch.zeros(M, M)
+        self.old_Q = torch.zeros(M, self.num_classes)
+        self.old_G = torch.zeros(M, M)
 
     def replace_fc(self, trainloader):
         self.network._network.eval()
@@ -264,9 +274,14 @@ class RanPAC(BaseModel):
         # print('Number of pre-trained feature dimensions = ',Features_f.shape[-1])
         Features_h = torch.nn.functional.relu(Features_f @ self.network._network.fc.W_rand.cpu())
 
-        self.Q = self.Q + Features_h.T @ Y
-        self.G = self.G + Features_h.T @ Features_h
-        ridge = self.optimise_ridge_parameter(Features_h, Y)
+        self.cur_Q = Features_h.T @ Y
+        self.cur_G = Features_h.T @ Features_h
+
+        #self.Q = self.Q + Features_h.T @ Y
+        #self.G = self.G + Features_h.T @ Features_h
+        self.Q = self.old_Q + self.cur_Q
+        self.G = self.old_G + self.cur_G
+        ridge = self.optimise_ridge_parameter_gpu(Features_h, Y)
         Wo = torch.linalg.solve(self.G + ridge * torch.eye(self.G.size(dim=0)), self.Q).T  # better nmerical stability than .inv
         self.network._network.fc.weight.data = Wo[0:self.network._network.fc.weight.shape[0], :].to(self.network._network.device)
 
@@ -286,6 +301,51 @@ class RanPAC(BaseModel):
         print("Optimal lambda: " + str(ridge))
         return ridge
     
+    def optimise_ridge_parameter_gpu(self, Features, Y):
+        Y = Y.to(self.device)
+        Features = Features.to(self.device)
+        ridges = 10.0**np.arange(-8, 9)
+        #ridges = 10.0**np.arange(5, 7)
+        num_val_samples = int(Features.shape[0] * 0.8)
+        losses = []
+        Q_val = Features[0:num_val_samples, :].T @ Y[0:num_val_samples, :]
+        G_val = Features[0:num_val_samples, :].T @ Features[0:num_val_samples, :]
+        for ridge in ridges:
+            try:
+                Wo = torch.linalg.solve(G_val + ridge * torch.eye(G_val.size(dim=0), device=self.device), Q_val).T  # better nmerical stability than .inv
+            except torch._C._LinAlgError:
+                losses.append(torch.tensor(float('inf')).to("cpu"))
+                continue
+            Y_train_pred = Features[num_val_samples::, :] @ Wo.T
+            losses.append(F.mse_loss(Y_train_pred, Y[num_val_samples::, :]).to('cpu'))
+        if torch.isinf(torch.tensor(losses)).sum() == len(losses):
+            raise ValueError("All losses are inf")
+        ridge = ridges[np.argmin(np.array(losses))]
+        #logging.info("Optimal lambda: " + str(ridge))
+        print("Optimal lambda: " + str(ridge))
+        return ridge
+    
+    def optimise_ridge_parameter2(self, Features, Y):
+        ridges = 10.0**np.arange(-8, 9)
+        #ridges = 10.0**np.arange(5, 7)
+        num_val_samples = int(Features.shape[0] * 0.8)
+        losses = []
+        Q_val = Features[0:num_val_samples, :].T @ Y[0:num_val_samples, :]
+        G_val = Features[0:num_val_samples, :].T @ Features[0:num_val_samples, :]
+        ridges = torch.tensor(ridges).to(self.device)
+        Wos = torch.linalg.solve(G_val.unsqueeze(0).repeat(ridges.shape[0], 1, 1) + ridges.unsqueeze(1).unsqueeze(1) * torch.eye(G_val.size(dim=0), device=self.device).unsqueeze(0).repeat(ridges.shape[0], 1, 1), Q_val.unsqueeze(0).repeat(ridges.shape[0], 1, 1)).transpose(1, 2)
+        Y_train_preds = Features[num_val_samples::, :].unsqueeze(0).repeat(ridges.shape[0], 1, 1) @ Wos.transpose(1, 2)
+        losses = F.mse_loss(Y_train_preds, Y[num_val_samples::, :].unsqueeze(0).repeat(ridges.shape[0], 1, 1), reduction='none').mean(dim=(1, 2))
+        #for ridge in ridges:
+        #    Wo = torch.linalg.solve(G_val + ridge * torch.eye(G_val.size(dim=0)), Q_val).T  # better nmerical stability than .inv
+        #    Y_train_pred = Features[num_val_samples::, :] @ Wo.T
+        #    losses.append(F.mse_loss(Y_train_pred, Y[num_val_samples::, :]))
+        ridge = ridges[np.argmin(np.array(losses))]
+        #logging.info("Optimal lambda: " + str(ridge))
+        print("Optimal lambda: " + str(ridge))
+        return ridge
+
+
     def get_client_info(self, dataloader: DataLoader):
         backbone_params = []
         for n, p in self.network._network.convnet.named_parameters():
