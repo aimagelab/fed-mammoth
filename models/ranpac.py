@@ -23,6 +23,7 @@ import torch
 import torch.nn.functional as F
 #from utils.conf import get_device
 from networks.vit_ranpac import RanPAC_Model
+from utils.tools import str_to_bool
 
 
 @register_model("ranpac")
@@ -44,6 +45,7 @@ class RanPAC(BaseModel):
         num_epochs: int = 5,
         rp_size: int = 10000,
         num_classes: int = 100,
+        use_scheduler: str_to_bool = False,
     ) -> None:
         self.lr = lr
         self.wd = wd_reg
@@ -58,6 +60,7 @@ class RanPAC(BaseModel):
         self.cur_round = 0
         self.momentum = momentum
         self.optimizer_str = optimizer
+        self.use_scheduler = use_scheduler
 
     def begin_task(self, dataset):
         # temporarily remove RP weights
@@ -95,22 +98,27 @@ class RanPAC(BaseModel):
             self.network._network.fc.W_rand = copy.deepcopy(server_info["W_rand"])
         else:
             self.W_rand = copy.deepcopy(server_info["W_rand"])
-            
-        for n, p in self.network._network.convnet.named_parameters():
-            if n in self.network._network.params_to_optimize:
+        if self.cur_task == 0:
+            i = 0
+            for n, p in self.network._network.convnet.named_parameters():
+                if n in self.network._network.params_to_optimize:
+                    p.data = copy.deepcopy(server_info["backbone_params"][i])
+                    i += 1
+            for n, p in self.network._network.convnet.named_parameters():
+                if n in self.network._network.params_to_optimize:
+                    pars.append(p)
+                    self.old_params.append(p.clone().detach())
+                    self.names.append(n)
+            for n, p in self.network._network.fc.named_parameters():
                 pars.append(p)
                 self.old_params.append(p.clone().detach())
                 self.names.append(n)
-        for n, p in self.network._network.fc.named_parameters():
-            pars.append(p)
-            self.old_params.append(p.clone().detach())
-            self.names.append(n)
-        params = [{"params": pars}]
-        if "SGD" in self.optimizer_str:
-            optimizer = self.optimizer_class(params, lr=self.lr, momentum=self.momentum, weight_decay=self.wd)
-        else:
-            optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
-        self.optimizer = self.fabric.setup_optimizers(optimizer)
+            params = [{"params": pars}]
+            if "SGD" in self.optimizer_str:
+                optimizer = self.optimizer_class(params, lr=self.lr, momentum=self.momentum, weight_decay=self.wd)
+            else:
+                optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
+            self.optimizer = self.fabric.setup_optimizers(optimizer)
         if self.cur_task == 0 and self.cur_round == 0:
             #self.optimizer = self.get_optimizer() already there
             self.scheduler = self.get_scheduler()
@@ -118,10 +126,13 @@ class RanPAC(BaseModel):
 
 
     def end_epoch(self):
-        self.scheduler.step()
+        if self.use_scheduler:
+            self.scheduler.step()
 
     def end_round_client(self, dataloader: DataLoader):
         self.cur_round += 1
+        if self.cur_task > 0:
+            self.replace_fc(dataloader)
 
     def freeze_backbone(self, is_first_session=False):
         # Freeze the parameters for ViT.
@@ -160,7 +171,7 @@ class RanPAC(BaseModel):
             self.freeze_backbone()
             self.setup_RP()
         #dataloader.dataset.transform = self.dataset.TEST_TRANSFORM
-        self.replace_fc(dataloader)
+            self.replace_fc(dataloader)
         return self.get_client_info(dataloader)
     
     def begin_round_server(self, info: F.List[dict] = None):
@@ -175,6 +186,23 @@ class RanPAC(BaseModel):
             del self.network._network.fc.W_rand
             self.network._network.fc = old
 
+    def end_round_server(self, client_info):
+        if self.cur_task == 0:
+            if self.avg_type == "weighted":
+                total_samples = sum([client["num_train_samples"] for client in client_info])
+                norm_weights = [client["num_train_samples"] / total_samples for client in client_info]
+            else:
+                weights = [1 if client["num_train_samples"] > 0 else 0 for client in client_info]
+                norm_weights = [w / sum(weights) for w in weights]
+            if len(client_info) > 0:
+                self.network._network.fc.weight.data = torch.stack([client["Wo"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+                i = 0
+                for n, p in self.network._network.convnet.named_parameters():
+                    if n in self.network._network.params_to_optimize:
+                        p.data = torch.stack([client["backbone_params"][i] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+                        i += 1
+        else:
+            self.end_task_server(client_info)
 
     def end_task_server(self, client_info):
         #if self.cur_task == 0:
@@ -244,6 +272,7 @@ class RanPAC(BaseModel):
 
     def optimise_ridge_parameter(self, Features, Y):
         ridges = 10.0**np.arange(-8, 9)
+        #ridges = 10.0**np.arange(5, 7)
         num_val_samples = int(Features.shape[0] * 0.8)
         losses = []
         Q_val = Features[0:num_val_samples, :].T @ Y[0:num_val_samples, :]
@@ -262,8 +291,9 @@ class RanPAC(BaseModel):
         for n, p in self.network._network.convnet.named_parameters():
             if n in self.network._network.params_to_optimize:
                 backbone_params.append(p.data)
+        Wo = self.network._network.fc.weight.data
         return {
-            "Wo": self.network._network.fc.weight.data,
+            "Wo": Wo,
             "backbone_params": backbone_params,
             "Q": self.Q,
             "G": self.G,
@@ -275,9 +305,16 @@ class RanPAC(BaseModel):
         if getattr(self, "W_rand", None) is not None:
             W_rand = self.W_rand
         Wo = self.network._network.fc.weight.data #if self.network._network.fc.use_RP == True else None
+        backbone_params = None
+        if self.cur_task == 0:
+            backbone_params = []
+            for n, p in self.network._network.convnet.named_parameters():
+                if n in self.network._network.params_to_optimize:
+                    backbone_params.append(p.data)
         return {
             "Wo": Wo,
             "Q": self.Q,
             "G": self.G,
-            "W_rand": W_rand
+            "W_rand": W_rand,
+            "backbone_params": backbone_params,
         }
