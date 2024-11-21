@@ -10,7 +10,6 @@ from transformers import T5Tokenizer, AutoModelForSequenceClassification, T5ForS
 # T5ForConditionalGeneration ha una language modeling head. Facendo intent classification direi di usare questa
 
 
-# Minaaaa/t5_small_imdb
 @register_network("t5")
 class T5(BaseNetwork):
 
@@ -19,7 +18,8 @@ class T5(BaseNetwork):
         print(f"Using {model_name}\tpretrained: {pretrained}\tnum_classes: {num_classes}")
 
         self.model = T5Model.from_pretrained(model_name)
-        self.head = nn.Linear(512, num_classes)
+        self.embed_dim = self.model.config.d_model
+        self.head = nn.Linear(self.embed_dim, num_classes)
 
     def forward(self, x, penultimate=False, prelogits=False):
         """
