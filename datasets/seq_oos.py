@@ -22,19 +22,23 @@ class MyOOS(Dataset):
         if not os.path.exists(self.root + "/OOS") and download:
             print("Downloading OOS...", file=sys.stderr)
             r = requests.get("https://raw.githubusercontent.com/clinc/oos-eval/master/data/data_full.json")
-            os.makedirs(self.root + "/OOS", exist_ok=True)
-            file_path = os.path.join(self.root, "OOS/oos.json")
-            with open(file_path, "w", encoding="utf-8") as json_file:
-                json.dump(r, json_file, ensure_ascii=False, indent=4)
+            print(r.status_code)
+            if r.status_code == 200:
+                os.makedirs(self.root + "/OOS", exist_ok=True)
+                file_path = os.path.join(self.root, "OOS/oos.json")
+                with open(file_path, "w", encoding="utf-8") as json_file:
+                    json.dump(r.json(), json_file, ensure_ascii=False, indent=4)
 
             print("Done", file=sys.stderr)
 
-        # self.data_split = pd.DataFrame(json.load(open(self.root + "/OOS/oos.json", "r"))["train" if self.train == True else "test"]) #TODO non capisco come mai il modulo json rogna. Intanto per risolvere altre cose uso un altro path
         self.data_split = pd.DataFrame(
-            json.load(open("C:\Riccardo\Dottorato\DL practice\lettura dataset\dataset\oos\oos.json", "r"))[
-                "train" if self.train == True else "test"
-            ]
-        )
+            json.load(open(self.root + "/OOS/oos.json", "r"))["train" if self.train == True else "test"]
+        )  # TODO non capisco come mai il modulo json rogna. Intanto per risolvere altre cose uso un altro path
+        # self.data_split = pd.DataFrame(
+        # json.load(open("C:\Riccardo\Dottorato\DL practice\lettura dataset\dataset\oos\oos.json", "r"))[
+        # "train" if self.train == True else "test"
+        # ]
+        # )
 
         texts = self.data_split.iloc[:, 0].tolist()  # converte i dati in una lista di stringhe da passare al tokenizer
         labels = self.data_split.iloc[:, 1].tolist()
