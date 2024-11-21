@@ -149,7 +149,7 @@ class PiLora(BaseModel):
     def forward(self, x, fabric=True):
         #prelogits, _ = self.network(x, penultimate=True)
         prelogits = self.network.forward(x, prelogits=True)
-        protos = torch.cat([self.class_protos[t][i] for t in range(len(self.class_protos)) for i in range(self.cpt)])
+        protos = torch.cat([self.class_protos[t][i] for t in range(self.num_tasks) for i in range(len(self.class_protos[t]) if t < self.num_tasks - 1 else self.cpt)])
         score = F.softmax(-torch.cdist(prelogits, protos, p=2), dim=1)
         return score
 
