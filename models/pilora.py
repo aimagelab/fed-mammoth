@@ -15,6 +15,7 @@ from models.regmean import RegMean
 from models.lora import Lora
 from tqdm import tqdm
 import math
+from transformers import T5Model
 
 
 @register_model("pilora")
@@ -71,17 +72,17 @@ class PiLora(Lora):
         self.cur_round = 0
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
         del self.old_delta
-        self.old_B = [] #list of dicts, each dict contains the B matrices for a task, keys are the self.lora_keys
-        self.old_Q = [] #list of dicts, each dict contains the Q matrices for a task, keys are the self.lora_keys
-        self.old_V = [] #list of dicts, each dict contains the V matrices for a task, keys are the self.lora_keys
-        self.old_A = [] #list of dicts, each dict contains the A matrices for a task, keys are the self.lora_keys
+        self.old_B = []  # list of dicts, each dict contains the B matrices for a task, keys are the self.lora_keys
+        self.old_Q = []  # list of dicts, each dict contains the Q matrices for a task, keys are the self.lora_keys
+        self.old_V = []  # list of dicts, each dict contains the V matrices for a task, keys are the self.lora_keys
+        self.old_A = []  # list of dicts, each dict contains the A matrices for a task, keys are the self.lora_keys
         self.class_protos = {}
 
     def forward(self, x, fabric=True):
         if fabric:
-            pre, _ = functional_call(self.network, self.optimization_dict, x, kwargs={'penultimate' : True})
+            pre, _ = functional_call(self.network, self.optimization_dict, x, kwargs={"penultimate": True})
         else:
-            pre, _ = functional_call(self.network.module, self.optimization_dict, x, kwargs={'penultimate' : True})
+            pre, _ = functional_call(self.network.module, self.optimization_dict, x, kwargs={"penultimate": True})
         protos = torch.cat([self.class_protos[t][i] for t in range(len(self.class_protos)) for i in range(self.cpt)])
         score = F.softmax(-torch.cdist(pre, protos, p=2), dim=1)
         return score
@@ -91,18 +92,18 @@ class PiLora(Lora):
             param.requires_grad = False  # freeze all the parameters
             if not self.lora_head and "head" in name:
                 self.head_keys.append(name)
-            if ("qkv" in name and "weight" in name) and ('blocks.0' in name):
+            if ("qkv" in name and "weight" in name) and ("blocks.0" in name):
                 self.lora_keys.append(name)
                 self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
                 self.old_delta[name] = nn.Parameter(
                     torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
                 ).to(self.device)
-                self.Q[name] = nn.Parameter(torch.zeros(param.shape[0] // 3, r, device = self.device), requires_grad=True)
-                self.K[name] = nn.Parameter(torch.zeros(param.shape[0] // 3, r, device = self.device), requires_grad=False)
-                self.V[name] = nn.Parameter(torch.zeros(param.shape[0] // 3, r, device = self.device), requires_grad=True)
-                self.cur_B[name] = torch.cat((self.Q[name],  #Q
-                                              self.K[name],  #K
-                                              self.V[name])) #V
+                self.Q[name] = nn.Parameter(torch.zeros(param.shape[0] // 3, r, device=self.device), requires_grad=True)
+                self.K[name] = nn.Parameter(
+                    torch.zeros(param.shape[0] // 3, r, device=self.device), requires_grad=False
+                )
+                self.V[name] = nn.Parameter(torch.zeros(param.shape[0] // 3, r, device=self.device), requires_grad=True)
+                self.cur_B[name] = torch.cat((self.Q[name], self.K[name], self.V[name]))  # Q  # K  # V
                 self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
                 nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
 
@@ -119,14 +120,28 @@ class PiLora(Lora):
             self.Q[key].requires_grad = True
             self.K[key].requires_grad = False
             self.V[key].requires_grad = True
-            #self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
+            # self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))
             self.cur_A[key].requires_grad = True
-            Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            Q = self.Q[key] + (
+                torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                if self.cur_task > 0
+                else 0
+            )
             K = self.K[key]
-            V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            V = self.V[key] + (
+                torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                if self.cur_task > 0
+                else 0
+            )
             self.cur_B[key] = torch.cat((Q, K, V))
-            B = self.cur_B[key]# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-            A = self.cur_A[key] + (torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            B = self.cur_B[
+                key
+            ]  # + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+            A = self.cur_A[key] + (
+                torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                if self.cur_task > 0
+                else 0
+            )
             optimization_dict[key] += B @ A
         return optimization_dict
 
@@ -135,40 +150,51 @@ class PiLora(Lora):
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict(fabric=fabric)
         eps = 1e-4
-        #self.cur_B[self.lora_keys[0]].retain_grad()
+        # self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
-            prelogits, outputs = functional_call(self.network, optimization_dict, inputs, kwargs={'penultimate' : True})
+            prelogits, outputs = functional_call(
+                self.network, optimization_dict, inputs, kwargs={"penultimate": True}
+            )  # TODO qua rogna con t5
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
-            #loss_ce = self.loss(outputs, labels % self.cpt)
-            #loss_ce = 0
+            # loss_ce = self.loss(outputs, labels % self.cpt)
+            # loss_ce = 0
             loss = 0
-            protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task+1) for i in range(self.cpt)])
-            #for idx, pre in enumerate(prelogits):
+            protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task + 1) for i in range(self.cpt)])
+            # for idx, pre in enumerate(prelogits):
             #    loss_dce += - torch.log((torch.exp(-self.temp * (pre - protos[labels[idx]]).pow(2).sum()) + eps) / (torch.exp(-self.temp * (pre - protos).pow(2).sum(-1)).sum() + eps))
-            #loss_dce /= len(labels)
-            distances = prelogits.pow(2).sum(1, keepdim=True) + protos.pow(2).sum(1, keepdim=True).T - 2 *(torch.matmul(prelogits, protos.T))
-            distances /= 768
+            # loss_dce /= len(labels)
+            distances = (
+                prelogits.pow(2).sum(1, keepdim=True)
+                + protos.pow(2).sum(1, keepdim=True).T
+                - 2 * (torch.matmul(prelogits, protos.T))
+            )
+            if isinstance(self.network.module.model, T5Model):
+                distances /= 512
+            else:
+                distances /= 768
             distances = distances.sqrt()
-            #logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
+            # logits = F.softmax(-distances, dim=1)self.old_Q[i][key].detach().to(self.device)
             loss_dce = F.cross_entropy(-distances / self.temp, labels)
-            #loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
+            # loss_pl = (prelogits - protos[labels]).pow(2).sum()# / len(labels)
             loss += loss_dce
-            #if self.use_pl:
+            # if self.use_pl:
             loss_pl = torch.index_select(distances, dim=1, index=(labels))
             loss_pl = torch.diagonal(loss_pl)
             loss_pl = torch.mean(loss_pl)
             loss += 0.001 * loss_pl
-            #if self.use_ort and self.cur_task > 0:
+            # if self.use_ort and self.cur_task > 0:
             loss_ort = 0
             if self.cur_task > 0:
                 for key in self.lora_keys:
                     for i in range(self.cur_task):
-                        #loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
-                        #loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
-                        #loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
+                        # loss_ort += torch.norm(self.cur_B[key] @ self.old_B[i][key].T, p=2)
+                        # loss_ort += torch.abs(torch.mm(self.Q[key], self.old_Q[i][key].T)).sum()
+                        # loss_ort += torch.abs(torch.mm(self.V[key], self.old_V[i][key].T)).sum()
                         loss_ort += torch.abs(torch.mm(self.cur_A[key], self.old_A[i][key].T)).sum()
             loss += 0.5 * loss_ort
-            loss_l1 = torch.linalg.matrix_norm(self.cur_A[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(self.cur_A[self.lora_keys[0]], ord=1)
+            loss_l1 = torch.linalg.matrix_norm(self.cur_A[self.lora_keys[0]], ord=1) + torch.linalg.matrix_norm(
+                self.cur_A[self.lora_keys[0]], ord=1
+            )
             loss += 0.01 * loss_l1
 
         if update:
@@ -205,7 +231,7 @@ class PiLora(Lora):
             self.head[key].requires_grad = True
             head_params.append(self.head[key])
         return backbone_params, head_params
-    
+
     def get_client_info(self, dataloader: DataLoader):
         for key in self.lora_keys:
             self.Q[key] = self.Q[key].detach()
@@ -224,7 +250,7 @@ class PiLora(Lora):
         }
         client_info["avg_feat"] = self.average_features
         return client_info
-    
+
     def get_server_info(self):
         for key in self.lora_keys:
             self.Q[key] = self.Q[key].detach()
@@ -241,10 +267,13 @@ class PiLora(Lora):
             "old_V": deepcopy(self.old_V),
         }
         server_info["proto"] = deepcopy(self.class_protos)
-        server_info["head"] = deepcopy(self.network.model.head.state_dict())
+        if isinstance(self.network.module.model, T5Model):
+            server_info["head"] = deepcopy(self.network.module.head.state_dict())
+        else:
+            server_info["head"] = deepcopy(self.network.model.head.state_dict())
         return server_info
 
-    #def get_optimization_dict(self, fabric=True):
+    # def get_optimization_dict(self, fabric=True):
     #    if fabric:
     #        optimization_dict = deepcopy(dict(self.network.state_dict()))
     #    else:
@@ -253,10 +282,9 @@ class PiLora(Lora):
     #        for key in self.head_keys:
     #            optimization_dict[key] = self.head[key]
     #    for key in self.lora_keys:
-#
+    #
     #        optimization_dict[key] += torch.cat((self.Q[key], self.K[key], self.V[key])) @ self.cur_A[key]
     #    return optimization_dict
-
 
     def begin_task(self, n_classes_per_task: int):
         BaseModel.begin_task(self, n_classes_per_task)
@@ -267,8 +295,15 @@ class PiLora(Lora):
             self.old_V.append({key: self.V[key].detach().clone() for key in self.lora_keys})
             self.init_matrices(init_K=False)
         self.cur_round = 0
-        #self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(self.768, 1)) for i in range(self.cpt)])
-        self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(1, 768), requires_grad=True).to(self.device) for i in range(self.cpt)])
+        # self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(self.768, 1)) for i in range(self.cpt)])
+        if isinstance(self.network.module.model, T5Model):
+            self.class_protos[self.cur_task] = nn.ParameterList(
+                [nn.Parameter(0.1 * torch.randn(1, 512), requires_grad=True).to(self.device) for i in range(self.cpt)]
+            )
+        else:
+            self.class_protos[self.cur_task] = nn.ParameterList(
+                [nn.Parameter(0.1 * torch.randn(1, 768), requires_grad=True).to(self.device) for i in range(self.cpt)]
+            )
         for i in range(self.cur_task):
             for key in self.lora_keys:
                 self.old_B[i][key] = self.old_B[i][key].detach()
@@ -276,18 +311,15 @@ class PiLora(Lora):
                 self.old_Q[i][key] = self.old_Q[i][key].detach()
                 self.old_V[i][key] = self.old_V[i][key].detach()
 
-
     def init_matrices(self, reverse=False, init_K=True):
         for key in self.lora_keys:
-            self.Q[key] = nn.Parameter(torch.zeros_like(self.Q[key], device = self.device), requires_grad = True)
+            self.Q[key] = nn.Parameter(torch.zeros_like(self.Q[key], device=self.device), requires_grad=True)
             if init_K:
-                self.K[key] = nn.Parameter(torch.zeros_like(self.K[key], device = self.device), requires_grad = False)
+                self.K[key] = nn.Parameter(torch.zeros_like(self.K[key], device=self.device), requires_grad=False)
             else:
                 self.K[key] = self.K[key].to(self.device)
-            self.V[key] = nn.Parameter(torch.zeros_like(self.V[key], device = self.device), requires_grad = True)
-            self.cur_B[key] = torch.cat((self.Q[key],  #Q
-                                            self.K[key],  #K
-                                            self.V[key])) #V
+            self.V[key] = nn.Parameter(torch.zeros_like(self.V[key], device=self.device), requires_grad=True)
+            self.cur_B[key] = torch.cat((self.Q[key], self.K[key], self.V[key]))  # Q  # K  # V
             self.cur_A[key] = nn.Parameter(torch.zeros_like(self.cur_A[key]), requires_grad=True).to(self.device)
             if not reverse:
                 nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
@@ -315,7 +347,10 @@ class PiLora(Lora):
                 param = param.detach()
         for param in self.class_protos[self.cur_task]:
             param.requires_grad = True
-        self.network.model.head.load_state_dict(server_info["head"])
+        if isinstance(self.network.module.model, T5Model):
+            self.network.head.load_state_dict(server_info["head"])
+        else:
+            self.network.model.head.load_state_dict(server_info["head"])
         # for p in self.network.model.head.parameters():
         #    p.requires_grad = True
         self.head = {
@@ -323,7 +358,11 @@ class PiLora(Lora):
             for key in self.head_keys
         }
         backbone_params, head_params = self.split_backbone_head()
-        params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}, {"params": self.class_protos[self.cur_task]}]
+        params = [
+            {"params": backbone_params, "lr": self.lr_back},
+            {"params": head_params},
+            {"params": self.class_protos[self.cur_task]},
+        ]
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
@@ -347,7 +386,7 @@ class PiLora(Lora):
         self.optimizer.zero_grad()
         self.optimizer = None
         Lora.end_round_client(self, dataloader)
-        #computing average class-wise features from dataset
+        # computing average class-wise features from dataset
         average_features = torch.zeros(self.cpt, 768).to(self.device)
         eps = 1e-10
         classes = []
@@ -365,12 +404,10 @@ class PiLora(Lora):
         classes = list(set(classes))
         classes_indexes = [c % self.cpt for c in classes]
         self.average_features = average_features[classes_indexes].to("cpu")
-        self.classes   = classes
-        #protos = torch.cat([self.class_protos[self.cur_task][i] for i in range(self.cpt)])
-        #features_distances = (protos - average_features).pow(2).sum(-1)
-        #reciprocal = 1 / (features_distances + eps)
-        
-
+        self.classes = classes
+        # protos = torch.cat([self.class_protos[self.cur_task][i] for i in range(self.cpt)])
+        # features_distances = (protos - average_features).pow(2).sum(-1)
+        # reciprocal = 1 / (features_distances + eps)
 
     def end_round_server(self, client_info: List[dict]):
         with torch.no_grad():
@@ -393,27 +430,23 @@ class PiLora(Lora):
             # fedavg on Lora matrices
             for key in self.lora_keys:
                 self.Q[key] = nn.Parameter(
-                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Qs, norm_weights)]).sum(
-                        0
-                    )
+                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Qs, norm_weights)]).sum(0)
                 )
                 self.K[key] = nn.Parameter(
-                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Ks, norm_weights)]).sum(
-                        0
-                    )
+                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Ks, norm_weights)]).sum(0)
                 )
                 self.V[key] = nn.Parameter(
-                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Vs, norm_weights)]).sum(
-                        0
-                    )
+                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(Vs, norm_weights)]).sum(0)
                 )
                 self.cur_A[key] = nn.Parameter(
-                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_A, norm_weights)]).sum(
-                        0
-                    )
+                    torch.stack([client[key] * norm_weight for client, norm_weight in zip(cl_A, norm_weights)]).sum(0)
                 )
             torch.cuda.empty_cache()
-            merging_alphas = torch.tensor([-float('inf') for i in range(len(client_info) * self.cpt)]).reshape(len(client_info), self.cpt).to(self.device)
+            merging_alphas = (
+                torch.tensor([-float("inf") for i in range(len(client_info) * self.cpt)])
+                .reshape(len(client_info), self.cpt)
+                .to(self.device)
+            )
             merging_weights = []
             avg_feat_per_class = []
             eps = 1e-10
@@ -424,22 +457,25 @@ class PiLora(Lora):
                         idx = client["classes"].index(c)
                         feats = torch.cat((feats, client["avg_feat"][idx].unsqueeze(0).to(self.device)))
                 protos = torch.stack([client["proto"][num_c].to(self.device) for client in client_info])
-                distances = (protos.pow(2).sum(1, keepdim=True) + feats.pow(2).sum(1, keepdim=True).T - 2 * (torch.matmul(protos, feats.T))).sqrt()
+                distances = (
+                    protos.pow(2).sum(1, keepdim=True)
+                    + feats.pow(2).sum(1, keepdim=True).T
+                    - 2 * (torch.matmul(protos, feats.T))
+                ).sqrt()
                 centers_distances = distances.sum(1)
-                reciprocal = 1 / (centers_distances + eps)  
+                reciprocal = 1 / (centers_distances + eps)
                 normalized = (reciprocal - reciprocal.min()) / (reciprocal.max() - reciprocal.min())
                 soft = F.softmax(normalized * self.soft_temp, dim=0)
                 new_proto = (protos * soft.unsqueeze(1)).sum(0).unsqueeze(0)
                 self.class_protos[self.cur_task][num_c] = nn.Parameter(new_proto, requires_grad=False)
             torch.cuda.empty_cache()
             del Qs, Ks, Vs, cl_A, client_info
-            #print(f"Time for head: {end2 - end} seconds")
+            # print(f"Time for head: {end2 - end} seconds")
             self.detach()
             self.set_optimization()
 
     def end_task_client(self, dataloader: DataLoader, server_info: dict):
         pass
-        
 
     def end_task_server(self, client_info: List[dict] = None):
         pass
@@ -462,14 +498,27 @@ class PiLora(Lora):
                 self.V[key] = self.V[key].to(self.device)
                 self.optimization_dict[key] = self.optimization_dict[key].to(self.device)
             for key in self.lora_keys:
-                Q = self.Q[key] + (torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                Q = self.Q[key] + (
+                    torch.stack([self.old_Q[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                    if self.cur_task > 0
+                    else 0
+                )
                 K = self.K[key]
-                V = self.V[key] + (torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                V = self.V[key] + (
+                    torch.stack([self.old_V[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                    if self.cur_task > 0
+                    else 0
+                )
                 self.cur_B[key] = torch.cat((Q, K, V))
-                B = self.cur_B[key].to(self.device)# + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
-                A = self.cur_A[key] + (torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                B = self.cur_B[key].to(
+                    self.device
+                )  # + (torch.stack([self.old_B[i][key].detach() for i in range(self.cur_task)]).sum(0) if self.cur_task > 0 else 0)
+                A = self.cur_A[key] + (
+                    torch.stack([self.old_A[i][key].detach().to(self.device) for i in range(self.cur_task)]).sum(0)
+                    if self.cur_task > 0
+                    else 0
+                )
                 self.optimization_dict[key] += B @ A
-
 
     def to(self, device="cpu", only_trainable=True):
         self.network = self.network.to(device)

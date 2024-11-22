@@ -39,4 +39,9 @@ class T5(BaseNetwork):
         )
         decoder_hidden_states = outputs.last_hidden_state
         pooled_output = decoder_hidden_states.mean(dim=1)
+        if prelogits:
+            return outputs
+        if penultimate:
+            pre_logits = pooled_output
+            return pre_logits, self.head(pooled_output)
         return self.head(pooled_output)
