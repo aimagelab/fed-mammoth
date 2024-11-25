@@ -97,6 +97,11 @@ class SequentialOOS(BaseDataset):
             getattr(self, f"{split}_dataset").targets = None
 
 
+@register_dataset("seq-oos_5")
+class SequentialOOS5(SequentialOOS):
+    N_CLASSES_PER_TASK = 5
+    N_TASKS = 30
+
 @register_dataset("joint-oos")
 class JointOOS(SequentialOOS):
     N_CLASSES_PER_TASK = 150
