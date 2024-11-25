@@ -65,31 +65,48 @@ class Lora(BaseModel):
         self.old_delta = {}
         self.cur_B = {}
         self.cur_A = {}
-        for name, param in network.named_parameters():
-            param.requires_grad = False  # freeze all the parameters
-            if not self.lora_head and "head" in name:
-                self.head_keys.append(name)
-            if ("qkv" in name and "weight" in name) or (
-                ("mlp" in name and "weight" in name)
-                or ("proj" in name and "weight" in name and "attn" in name)
-                or (self.lora_head and "head" in name and "weight" in name)
-            ):
-                self.lora_keys.append(name)
-                self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
-                self.old_delta[name] = nn.Parameter(
-                    torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
-                ).to(self.device)
-                self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
-                self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
-                nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
-        self.optimization_dict = {}
-        if not self.lora_head:
-            self.head = {
-                key: nn.Parameter(torch.tensor(self.network.state_dict()[key].clone().detach()), requires_grad=True).to(
-                    self.device
-                )
-                for key in self.head_keys
-            }
+        if "t5" in str(type(network.model)).lower():
+            for n, m in network.named_modules():
+                typ = type(m)
+                if "linear" in str(typ).lower() and not "head" in n:
+                    for n2, p2 in m.named_parameters():
+                        if "weight" in n2:
+                            name = n + "." + n2
+                            param = p2
+                            self.lora_keys.append(name)
+                            self.lora_params[name] = {name: [p2.shape[1], p2.shape[0]]}
+                            self.old_delta[name] = nn.Parameter(
+                                torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
+                            ).to(self.device)
+                            self.cur_B[name] = nn.Parameter(torch.zeros(p2.shape[0], r), requires_grad=True).to(self.device)
+                            self.cur_A[name] = nn.Parameter(torch.zeros(r, p2.shape[1]), requires_grad=True).to(self.device)
+                            nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
+        else:
+            for name, param in network.named_parameters():
+                param.requires_grad = False  # freeze all the parameters
+                if not self.lora_head and "head" in name:
+                    self.head_keys.append(name)
+                if ("qkv" in name and "weight" in name) or (
+                    ("mlp" in name and "weight" in name)
+                    or ("proj" in name and "weight" in name and "attn" in name)
+                    or (self.lora_head and "head" in name and "weight" in name)
+                ):
+                    self.lora_keys.append(name)
+                    self.lora_params[name] = {name: [param.shape[1], param.shape[0]]}
+                    self.old_delta[name] = nn.Parameter(
+                        torch.zeros(param.shape[0], param.shape[1]), requires_grad=False
+                    ).to(self.device)
+                    self.cur_B[name] = nn.Parameter(torch.zeros(param.shape[0], r), requires_grad=True).to(self.device)
+                    self.cur_A[name] = nn.Parameter(torch.zeros(r, param.shape[1]), requires_grad=True).to(self.device)
+                    nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
+            self.optimization_dict = {}
+            if not self.lora_head:
+                self.head = {
+                    key: nn.Parameter(torch.tensor(self.network.state_dict()[key].clone().detach()), requires_grad=True).to(
+                        self.device
+                    )
+                    for key in self.head_keys
+                }
         self.old_tasks_A = None
         self.old_tasks_B = None
         if self.cl_merge == "individual":

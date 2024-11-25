@@ -68,28 +68,37 @@ class RegMean(BaseModel):
             else torch.float16 if gram_dtype == "16" else torch.bfloat16 if gram_dtype == "b16" else torch.float64
         )
         if regmean_all:
-            for name, module in self.network.named_modules():
-                # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
-                # list(module.parameters())
-                if (
-                    len(list(module.parameters())) > 0
-                    and len(list(module.children())) == 0
-                    and (
-                        (
-                            (("mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
-                            and (
-                                only_square <= 0
-                                or module.state_dict()["weight"].shape[0]
-                                == module.state_dict()["weight"].shape[1]
-                                == only_square
+            if "t5" in str(type(network)).lower():
+                for name, module in self.network.named_modules():
+                    typ = type(module)
+                    if "linear" in str(typ).lower():
+                        for n2, p2 in module.named_parameters():
+                            if "weight" in n2:
+                                self.gram_modules.append(name)
+                                self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
+            else:
+                for name, module in self.network.named_modules():
+                    # if ((("qkv" in name or "mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all) or "head" in name) and not "drop" in name and not "act" in name and not "norm" in name:
+                    # list(module.parameters())
+                    if (
+                        len(list(module.parameters())) > 0
+                        and len(list(module.children())) == 0
+                        and (
+                            (
+                                (("mlp" in name or ("proj" in name and "attn" in name)) and self.regmean_all)
+                                and (
+                                    only_square <= 0
+                                    or module.state_dict()["weight"].shape[0]
+                                    == module.state_dict()["weight"].shape[1]
+                                    == only_square
+                                )
                             )
+                            or "head" in name
+                            or "qkv" in name
                         )
-                        or "head" in name
-                        or "qkv" in name
-                    )
-                ):
-                    self.gram_modules.append(name)
-                    self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
+                    ):
+                        self.gram_modules.append(name)
+                        self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
         else:
             for name, module in self.network.named_modules():
                 if "head" in name and len(list(module.parameters())) > 0 and len(list(module.children())) == 0:

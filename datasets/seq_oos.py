@@ -95,3 +95,9 @@ class SequentialOOS(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+
+@register_dataset("joint-oos")
+class JointOOS(SequentialOOS):
+    N_CLASSES_PER_TASK = 150
+    N_TASKS = 1

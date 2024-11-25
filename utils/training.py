@@ -12,12 +12,14 @@ from utils.tools import get_time_str
 from datasets.seq_oos import SequentialOOS
 
 
-def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
+def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset, return_responses = False):
     correct, total = 0, 0
     task_accuracies = []
     training_status = model.training
     model.eval()
     start_class = 0
+    labels_tensor = torch.tensor([], device = model.device)
+    responses_tensor = torch.tensor([], device = model.device)
     if isinstance(dataset.N_CLASSES_PER_TASK, list):
         end_class = sum(dataset.N_CLASSES_PER_TASK[: task + 1])
     else:
@@ -39,6 +41,8 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
                     task_total += labels.shape[0]
                     correct += (pred == labels).sum().item()
                     total += labels.shape[0]
+                    labels_tensor = torch.cat((labels_tensor, labels), 0)
+                    responses_tensor = torch.cat((responses_tensor, pred), 0)
             task_accuracies.append(round(task_correct / task_total * 100, 2))
 
     model.train(training_status)
@@ -50,7 +54,7 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset):
         task_accuracies,
     )
     res = [round(correct / total * 100, 2), task_accuracies]
-    return res
+    return res if not return_responses else [res, labels_tensor, responses_tensor]
 
 
 def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx: int):
@@ -160,7 +164,7 @@ def train(
     for task in range(dataset.N_TASKS):
         if task < start_task:
             continue
-        if args["dataset"] == "seq-oos":
+        if args["dataset"] == "seq-oos" or args["dataset"] == "joint-oos":
             train_loaders, test_loaders = dataset.get_cur_dataloaders_oos(task)
         else:
             train_loaders, test_loaders = dataset.get_cur_dataloaders(task)  # TODO: test_loaders are not used
