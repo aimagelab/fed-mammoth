@@ -100,8 +100,9 @@ class SequentialOOS(BaseDataset):
 
 @register_dataset("seq-oos_5")
 class SequentialOOS5(SequentialOOS):
-    N_CLASSES_PER_TASK = 5
-    N_TASKS = 30
+    N_CLASSES_PER_TASK = 30
+    N_TASKS = 5
+
 
 @register_dataset("joint-oos")
 class JointOOS(SequentialOOS):
