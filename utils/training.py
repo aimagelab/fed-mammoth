@@ -164,7 +164,7 @@ def train(
     for task in range(dataset.N_TASKS):
         if task < start_task:
             continue
-        if args["dataset"] == "seq-oos" or args["dataset"] == "joint-oos":
+        if "oos" in args["dataset"]:
             train_loaders, test_loaders = dataset.get_cur_dataloaders_oos(task)
         else:
             train_loaders, test_loaders = dataset.get_cur_dataloaders(task)  # TODO: test_loaders are not used
