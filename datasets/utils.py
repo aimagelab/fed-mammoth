@@ -11,6 +11,7 @@ class BaseDataset:
     N_TASKS = None
     TRAIN_TRANSFORM = None
     TEST_TRANSFORM = None
+    IS_TEXT = False
 
     def __init__(
         self,

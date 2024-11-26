@@ -27,7 +27,8 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset, return_respon
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
-            if isinstance(dataset, SequentialOOS):
+            #if isinstance(dataset, SequentialOOS):
+            if dataset.IS_TEXT:
                 test_loaders = dataset.get_cur_dataloaders_oos(t)[1]
             else:
                 test_loaders = dataset.get_cur_dataloaders(t)[1]
@@ -164,7 +165,8 @@ def train(
     for task in range(dataset.N_TASKS):
         if task < start_task:
             continue
-        if "oos" in args["dataset"]:
+        #if "oos" in args["dataset"]:
+        if dataset.IS_TEXT:
             train_loaders, test_loaders = dataset.get_cur_dataloaders_oos(task)
         else:
             train_loaders, test_loaders = dataset.get_cur_dataloaders(task)  # TODO: test_loaders are not used

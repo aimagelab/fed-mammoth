@@ -122,17 +122,20 @@ class PiLora(BaseModel):
 
         self.lora_keys = []
         self.lora_keys.append('model.encoder.block.0.layer.0.SelfAttention.q.weight')
-        self.lora_keys.append('model.encoder.block.0.layer.0.SelfAttention.k.weight')
+        #self.lora_keys.append('model.encoder.block.0.layer.0.SelfAttention.k.weight')
         self.lora_keys.append('model.encoder.block.0.layer.0.SelfAttention.v.weight')
 
 
         #gradients will be set by the clients with the "set_gradients()" at the beginning of each round
         self.cur_B['model.encoder.block.0.layer.0.SelfAttention.q.weight'] = nn.Parameter(torch.zeros((self.dim, self.r)), requires_grad=False).to(self.device)
-        self.cur_B['model.encoder.block.0.layer.0.SelfAttention.k.weight'] = nn.Parameter(torch.zeros((self.dim, self.r)), requires_grad=False).to(self.device)
+        #self.cur_B['model.encoder.block.0.layer.0.SelfAttention.k.weight'] = nn.Parameter(torch.zeros((self.dim, self.r)), requires_grad=False).to(self.device)
         self.cur_B['model.encoder.block.0.layer.0.SelfAttention.v.weight'] = nn.Parameter(torch.zeros((self.dim, self.r)), requires_grad=False).to(self.device)
         self.cur_A['model.encoder.block.0.layer.0.SelfAttention.q.weight'] = nn.Parameter(torch.ones((self.r, self.dim)), requires_grad=False).to(self.device)
-        self.cur_A['model.encoder.block.0.layer.0.SelfAttention.k.weight'] = nn.Parameter(torch.ones((self.r, self.dim)), requires_grad=False).to(self.device)
+        #self.cur_A['model.encoder.block.0.layer.0.SelfAttention.k.weight'] = nn.Parameter(torch.ones((self.r, self.dim)), requires_grad=False).to(self.device)
         self.cur_A['model.encoder.block.0.layer.0.SelfAttention.v.weight'] = nn.Parameter(torch.ones((self.r, self.dim)), requires_grad=False).to(self.device)
+        nn.init.kaiming_uniform_(self.cur_A['model.encoder.block.0.layer.0.SelfAttention.q.weight'], a=math.sqrt(5))
+        #nn.init.kaiming_uniform_(self.cur_A['model.encoder.block.0.layer.0.SelfAttention.k.weight'], a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.cur_A['model.encoder.block.0.layer.0.SelfAttention.v.weight'], a=math.sqrt(5))
         self.old_A = {}
         self.old_B = {}
         self.class_protos = {}
@@ -149,8 +152,11 @@ class PiLora(BaseModel):
     def set_optimization_dict(self, optimization_dict = None):
         if optimization_dict is None:
             optimization_dict = deepcopy(self.network.state_dict())
+        for i in range(self.cur_task):
+            for key in self.lora_keys:
+                optimization_dict[key] += self.old_B[i][key] @ self.old_A[i][key]
         optimization_dict['model.encoder.block.0.layer.0.SelfAttention.q.weight'] += self.cur_B['model.encoder.block.0.layer.0.SelfAttention.q.weight'] @ self.cur_A['model.encoder.block.0.layer.0.SelfAttention.q.weight']
-        optimization_dict['model.encoder.block.0.layer.0.SelfAttention.k.weight'] += self.cur_B['model.encoder.block.0.layer.0.SelfAttention.k.weight'] @ self.cur_A['model.encoder.block.0.layer.0.SelfAttention.k.weight']
+        #optimization_dict['model.encoder.block.0.layer.0.SelfAttention.k.weight'] += self.cur_B['model.encoder.block.0.layer.0.SelfAttention.k.weight'] @ self.cur_A['model.encoder.block.0.layer.0.SelfAttention.k.weight']
         optimization_dict['model.encoder.block.0.layer.0.SelfAttention.v.weight'] += self.cur_B['model.encoder.block.0.layer.0.SelfAttention.v.weight'] @ self.cur_A['model.encoder.block.0.layer.0.SelfAttention.v.weight']
         return optimization_dict 
 
@@ -255,6 +261,7 @@ class PiLora(BaseModel):
             self.old_B[self.cur_task - 1] = deepcopy(self.cur_B)
             for key in self.lora_keys:
                 self.cur_A[key] = nn.Parameter(torch.tensor(torch.ones((self.r, self.dim)), device = self.device, requires_grad=True))
+                nn.init.kaiming_uniform_(self.cur_A[key], a=math.sqrt(5))
                 self.cur_B[key] = nn.Parameter(torch.tensor(torch.zeros((self.dim, self.r)), device = self.device,  requires_grad=True))
         #self.class_protos[self.cur_task] = nn.ParameterList([nn.Parameter(0.1*torch.randn(1, 512), requires_grad=True).to(self.device) for i in range(self.cpt)])
         self.cur_round = 0
