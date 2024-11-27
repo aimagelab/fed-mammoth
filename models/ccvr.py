@@ -107,7 +107,10 @@ class CCVR(BaseModel):
             if mogs.get(clas) is not None:
                 mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
         self.mogs_per_task[self.cur_task] = mogs
-        optimizer = torch.optim.SGD(self.network.model.head.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
+        if "t5" not in str(type(self.network.model)).lower():
+            optimizer = torch.optim.SGD(self.network.model.head.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
+        else:
+            optimizer = torch.optim.SGD(self.network.head.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
         logits_norm = torch.tensor([], dtype=torch.float32).to(self.device)
         for epoch in range(5):
@@ -147,7 +150,7 @@ class CCVR(BaseModel):
                         if self.full_cov:
                             cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
                         else:
-                            cov = (torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var) + 1e-8
+                            cov = (torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var) + (1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device))
                         m = MultivariateNormal(cls_mean, cov)
                         n_samples = int(torch.round(gaussian_samples[id]))
                         sampled_data_single = m.sample((n_samples,))
@@ -165,7 +168,10 @@ class CCVR(BaseModel):
             for _iter in range(crct_num):
                 inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                outputs = self.network.model.head(inp)
+                if "t5" not in str(type(self.network.model)).lower():
+                    outputs = self.network.model.head(inp)
+                else:
+                    outputs = self.network.head(inp)
                 logits = outputs
                 per_task_norm = []
                 cur_t_size = 0
@@ -191,10 +197,10 @@ class CCVR(BaseModel):
             self.optimizer = self.fabric.setup_optimizers(optimizer)
             self.linear_probe(dataloader)
             self.done_linear_probe = True
-            # restore correct optimizer
-            params = [{"params": self.network.model.parameters()}]
-            optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd_reg)
-            self.optimizer = self.fabric.setup_optimizers(optimizer)
+        # restore correct optimizer
+        params = [{"params": self.network.model.parameters()}]
+        optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd_reg)
+        self.optimizer = self.fabric.setup_optimizers(optimizer)
 
     def get_client_info(self, dataloader: DataLoader):
         return {
