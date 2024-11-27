@@ -81,6 +81,18 @@ class Lora(BaseModel):
                             self.cur_B[name] = nn.Parameter(torch.zeros(p2.shape[0], r), requires_grad=True).to(self.device)
                             self.cur_A[name] = nn.Parameter(torch.zeros(r, p2.shape[1]), requires_grad=True).to(self.device)
                             nn.init.kaiming_uniform_(self.cur_A[name], a=math.sqrt(5))
+                elif "head" in n:
+                    for n2, p2 in m.named_parameters():
+                        name = n + "." + n2
+                        #param = p2
+                        self.head_keys.append(name)
+
+            self.head = {
+                key: nn.Parameter(torch.tensor(self.network.state_dict()[key].clone().detach()), requires_grad=True).to(
+                    self.device
+                )
+                for key in self.head_keys
+            }
         else:
             for name, param in network.named_parameters():
                 param.requires_grad = False  # freeze all the parameters
