@@ -11,6 +11,54 @@ from utils.status import progress_bar
 from utils.tools import get_time_str
 from datasets.seq_oos import SequentialOOS
 
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+
+def compute_forgetting(accuracies: List[List[float]]) -> List[float]:
+    forgetting = []
+    tasks = len(accuracies)
+    last_accs = accuracies[-1]
+    for i in range(tasks):
+        forgetting.append(accuracies[i][i] - last_accs[i])
+    return forgetting
+
+
+
+def accs_and_forgetting_matrix(accuracies: List[List[float]], forgetting: List[float], output_folder: str = None) -> None:
+    if output_folder is None:
+        output_folder = os.getcwd()
+    tasks = len(accuracies)
+    #fill list of accuracies with zeros
+    for acc in accuracies:
+        while len(acc) < tasks:
+            acc.append(0.0)
+    accs = np.array(accuracies)
+    fig, ax = plt.subplots()
+    ax.matshow(accs, cmap='viridis')
+    for i in range(tasks):
+        for j in range(tasks):
+            ax.text(j, i, f'{accs[i, j]:.2f}', ha='center', va='center', color='black')
+    plt.title("Task accuracies")
+    plt.xlabel("Task")
+    plt.ylabel("Task")
+    acc_path = os.path.join(output_folder, "task_accuracies.png")
+    plt.savefig(acc_path)
+    plt.close()
+
+    #now we plot forgetting as a vector, similar to what we did with accuracies
+    fig, ax = plt.subplots()
+    forgetting.append(round(sum(forgetting) / len(forgetting), 2))
+    ax.matshow(np.array([forgetting]), cmap='viridis')
+    for i in range(tasks + 1):
+        ax.text(i, 0, f'{forgetting[i]:.2f}', ha='center', va='center', color='black')
+    plt.title("Forgetting")
+    plt.xlabel("Task")
+    plt.ylabel("Forgetting")
+    forg_path = os.path.join(output_folder, "forgetting.png")
+    plt.savefig(forg_path)
+    return [acc_path, forg_path]
 
 def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset, return_responses = False):
     correct, total = 0, 0
@@ -71,7 +119,10 @@ def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx: i
     with torch.no_grad():
         for t in range(task + 1):
             task_correct, task_total = 0, 0
-            test_loader = dataset.get_cur_dataloaders(t)[1][idx]
+            if dataset.IS_TEXT:
+                test_loader = dataset.get_cur_dataloaders_oos(t)[1][idx]
+            else:
+                test_loader = dataset.get_cur_dataloaders(t)[1][idx]
             test_loader = fabric.setup_dataloaders(test_loader)
             for inputs, labels in test_loader:
                 outputs = model(inputs)[:, start_class:end_class]
@@ -141,6 +192,8 @@ def train(
     args: dict,
     output_folder: str,
 ) -> None:
+    
+    accuracies_each_task = []
 
     if args["wandb"]:
         name = f"{args['nickname']}_{args['dataset']}_{args['model']}_rnds{args['num_comm_rounds']}_clnts{args['num_clients']}_epchs{args['num_epochs']}_bs{args['batch_size']}_lr{args['lr']}"
@@ -299,6 +352,7 @@ def train(
         server_model.to(model.device)
         torch.cuda.empty_cache()
         accuracy = evaluate(fabric, task, server_model, dataset)
+        accuracies_each_task.append(accuracy[1])
         print(f"Task {task + 1} time:", get_time_str(time() - last_task_time))
         print("__________\n")
 
@@ -317,6 +371,13 @@ def train(
     for client_model in client_models:
         client_model.end_training()
     server_model.end_training()
+    forgetting = compute_forgetting(accuracies_each_task)
+    paths = accs_and_forgetting_matrix(accuracies_each_task, forgetting, output_folder)
+    if args["wandb"]:
+        acc_image = wandb.Image(paths[0], caption="Accuracies Matrix")
+        forg_image = wandb.Image(paths[1], caption="Forgetting Vector")
+
+        wandb.log({"Accuracies Matrix": acc_image, "Forgetting Vector": forg_image})
 
     if args["wandb"]:
         wandb.finish()
