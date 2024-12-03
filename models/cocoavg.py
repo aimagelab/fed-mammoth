@@ -11,7 +11,7 @@ from networks.vit import VisionTransformer
 import numpy as np
 
 
-@register_model("cocoavg")
+@register_model("old_cocoavg")
 class CocoAvg(BaseModel):
 
     def __init__(
@@ -76,7 +76,6 @@ class CocoAvg(BaseModel):
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         with self.fabric.autocast():
-            inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels % self.cpt)
 
@@ -379,3 +378,4 @@ class CocoAvg(BaseModel):
 
     def get_server_info(self):
         return {"params": self.network.get_params()}
+
