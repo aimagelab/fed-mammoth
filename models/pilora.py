@@ -152,6 +152,7 @@ class PiLora(Lora):
         eps = 1e-4
         # self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             prelogits, outputs = functional_call(
                 self.network, optimization_dict, inputs, kwargs={"penultimate": True}
             )  # TODO qua rogna con t5

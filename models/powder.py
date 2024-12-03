@@ -6,13 +6,11 @@ from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
 from models.utils import BaseModel
-from networks.vit_powder import ViTZoo
+from networks.vit_prompt_coda import ViTZoo
 import os
 from utils.tools import str_to_bool
 import math
 from models.codap import CodaPrompt
-from copy import deepcopy
-from tqdm import tqdm
 
 
 class _LRScheduler(object):
@@ -75,8 +73,8 @@ class CosineSchedule(_LRScheduler):
         return [self.cosine(base_lr) for base_lr in self.base_lrs]
 
 
-@register_model("coda_lwf")
-class Coda_LwF(CodaPrompt):
+@register_model("powder")
+class Powder(CodaPrompt):
     def __init__(
         self,
         fabric,
@@ -91,7 +89,6 @@ class Coda_LwF(CodaPrompt):
         clip_grads: str_to_bool = False,
         use_scheduler: str_to_bool = False,
     ) -> None:
-        linear_probe = False
         super().__init__(
             fabric,
             network,
@@ -105,28 +102,16 @@ class Coda_LwF(CodaPrompt):
             clip_grads,
             use_scheduler,
         )
-        self.compute_similarities = False
-        self.network : ViTZoo
-        self.scores_per_class = None
-        self.classes = None
-        self.old_network = None
-        self.betas = None
-        #self.network.mark_forward_method(self.network.get_scores)
-        self.network.mark_forward_method("get_scores")
+        self.G_task = None
+        self.G_class = None
+        self.mean_att = None
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
             inputs = self.augment(inputs)
-            with torch.no_grad():
-                old_out = self.old_network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
-            outputs = self.network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
-            loss_ce = self.loss(outputs, labels % self.cpt)
-            loss_dual_full = F.kl_div(F.log_softmax(old_out, dim=1), F.softmax(outputs, dim=1), reduction="none")
-            one_hot_labels = torch.logical_not(F.one_hot(labels % self.cpt, self.cpt)).float()
-            beta = (self.betas.unsqueeze(0) @ one_hot_labels.T).flatten()
-            loss_dual = ((loss_dual_full * one_hot_labels).sum(1) * beta).mean()
-            loss = loss_ce + loss_dual
+            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            loss = self.loss(outputs, labels % self.cpt)
 
         if update:
             self.fabric.backward(loss)
@@ -142,9 +127,37 @@ class Coda_LwF(CodaPrompt):
     def forward(self, x):  # used in evaluate, while observe is used in training
         return self.network(x, pen=False, train=False)
 
+    def linear_probe(self, dataloader: DataLoader):
+        for epoch in range(5):
+            for inputs, labels in dataloader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                with torch.no_grad():
+                    pre_logits = self.network(inputs, pen=True, train=False)
+                outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
+                labels = labels % self.cpt
+                loss = F.cross_entropy(outputs, labels)
+                self.optimizer.zero_grad()
+                self.fabric.backward(loss)
+                self.optimizer.step()
+
     def begin_task(self, n_classes_per_task: int):
         super().begin_task(n_classes_per_task)
-        self.compute_similarities = True
+
+    def warmup_task_client(self, server_info, dataloader: DataLoader):
+        # here we'll retrieve the alphas, that is, the attention vectors, and
+        # average them to get the global attention vector, by passing the entire 
+        # local dataset to the local model
+        self.network.set_params(server_info["params"])
+        self.network.eval()
+        attention_vectors = []
+        with torch.no_grad():
+            for inputs, _ in dataloader:
+                inputs = inputs.to(self.device)
+                _, att = self.network(inputs, train = True) # train = True so that only current prompts are used
+                attention_vectors.append(att)
+        self.network.train()
+        self.mean_att = torch.stack(attention_vectors).mean(0)
+
 
     def end_task_client(self, dataloader: DataLoader = None, server_info: dict = None):
         return super().end_task_client(dataloader, server_info)
@@ -166,33 +179,16 @@ class Coda_LwF(CodaPrompt):
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
-        self.old_network = deepcopy(self.network) #latest server model
-        # restore correct optimizer
+        if self.do_linear_probe and not self.done_linear_probe:
+            optimizer = self.optimizer_class(self.network.last.parameters(), lr=1e-3, weight_decay=0)
+            self.optimizer = self.fabric.setup_optimizers(optimizer)
+            self.linear_probe(dataloader)
+            self.done_linear_probe = True
+            # restore correct optimizer
         params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
         optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
         self.optimizer = self.fabric.setup_optimizers(optimizer)
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
-        scores_per_class = torch.zeros((self.cpt, 10), device=self.device)
-        classes = torch.zeros(self.cpt, device=self.device)
-        eps = 1e-20
-        if self.compute_similarities:
-            with torch.no_grad():
-                for i, (inputs, labels) in enumerate(tqdm(dataloader, desc="Computing similarities")):
-                    inputs = inputs.to(self.device)
-                    batch_scores = self.network.get_scores(inputs, pen=True, train=True)
-                    #scores = torch.cat((scores, torch.stack(batch_scores)), dim=0)
-                    labels_one_hot = torch.nn.functional.one_hot(labels % self.cpt, self.cpt).float()
-                    scores_per_class += labels_one_hot.T @ batch_scores
-                    labs, nums = torch.unique(labels, return_counts=True)
-                    classes[labs % self.cpt] += nums
-            scores_per_class = (scores_per_class) / (classes.unsqueeze(1) + eps) #average prompt-selection weights (scores) per class
-            self.scores_per_class = deepcopy(scores_per_class)
-            not_classes = classes == 0
-            scores_per_class[not_classes] = torch.Tensor([-float('Inf')]).to(self.device)
-            self.betas = torch.exp(scores_per_class.sum(1)) / torch.exp(scores_per_class.sum(1)).sum()
-            self.classes = classes
-            self.compute_similarities = False
-
 
     def end_epoch(self):
         if self.use_scheduler:
@@ -206,11 +202,24 @@ class Coda_LwF(CodaPrompt):
         }
 
     def get_server_info(self):
-        server_info = {"params": self.network.get_params()}
-        return server_info
+        server_info = {"params": self.network.get_params(), 
+                       "prompt": self.network.prompt.get_params()}
 
     def end_round_client(self, dataloader: DataLoader):
-        self.old_network = None
-        if self.optimizer is not None:
-            self.optimizer.zero_grad()
-            self.optimizer = None
+        pass
+
+    def save_checkpoint(self, output_folder: str, task: int, comm_round: int) -> None:
+        training_status = self.network.training
+        self.network.eval()
+
+        checkpoint = {
+            "task": task,
+            "comm_round": comm_round,
+            "network": self.network,
+            "optimizer": self.optimizer,
+        }
+        name = "coda"
+        name += "_linear_probe" if self.do_linear_probe else ""
+        name += f"_task_{task}_round_{comm_round}_checkpoint.pt"
+        self.fabric.save(os.path.join(output_folder, name), checkpoint)
+        self.network.train(training_status)

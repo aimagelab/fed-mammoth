@@ -26,7 +26,7 @@ from networks.vit_ranpac import RanPAC_Model
 from utils.tools import str_to_bool
 
 
-@register_model("ranpac")
+@register_model("ranpac2")
 class RanPAC(BaseModel):
     """RanPAC: Random Projections and Pre-trained Models for Continual Learning."""
     NAME = 'ranpac'
@@ -79,11 +79,11 @@ class RanPAC(BaseModel):
                 self.network._network.params_to_optimize.append(n)
             self.scheduler = self.get_scheduler()
             self.optimizer.zero_grad()
-        else:
-            self.old_Q = copy.deepcopy(self.Q)
-            self.old_G = copy.deepcopy(self.G)
-            self.Q = torch.zeros_like(self.old_Q)
-            self.G = torch.zeros_like(self.old_G)
+        #else:
+        #    self.old_Q = copy.deepcopy(self.Q)
+        #    self.old_G = copy.deepcopy(self.G)
+        #    self.Q = torch.zeros_like(self.old_Q)
+        #    self.G = torch.zeros_like(self.old_G)
 
     def compare_params(self,):
         for n, p in self.network._network.convnet.named_parameters():
@@ -96,8 +96,8 @@ class RanPAC(BaseModel):
         pars = []
         self.old_params = []
         self.names = []
-        #self.Q = copy.deepcopy(server_info["Q"])
-        #self.G = copy.deepcopy(server_info["G"])
+        self.Q = copy.deepcopy(server_info["Q"])
+        self.G = copy.deepcopy(server_info["G"])
         self.network._network.fc.weight.data = copy.deepcopy(server_info["Wo"])
         if getattr(self.network._network.fc, "W_rand", None) is not None:
             self.network._network.fc.W_rand = copy.deepcopy(server_info["W_rand"])
@@ -230,8 +230,11 @@ class RanPAC(BaseModel):
                     if n in self.network._network.params_to_optimize:
                         p.data = torch.stack([client["backbone_params"][i] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
                         i += 1
-            # self.Q = torch.stack([client["Q"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
-            # self.G = torch.stack([client["G"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+            self.Q = torch.stack([client["Q"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+            self.G = torch.stack([client["G"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
+            #ridge = self.optimise_ridge_parameter_gpu(Features_h, Y)
+            #Wo = torch.linalg.solve(self.G + ridge * torch.eye(self.G.size(dim=0)), self.Q).T  # better nmerical stability than .inv
+            #self.network._network.fc.weight.data = Wo[0:self.network._network.fc.weight.shape[0], :].to(self.network._network.device)
             self.network._network.fc.weight.data = torch.stack([client["Wo"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]).sum(0)
 
     def setup_RP(self):
@@ -275,13 +278,13 @@ class RanPAC(BaseModel):
         # print('Number of pre-trained feature dimensions = ',Features_f.shape[-1])
         Features_h = torch.nn.functional.relu(Features_f @ self.network._network.fc.W_rand.cpu())
 
-        self.cur_Q = Features_h.T @ Y
-        self.cur_G = Features_h.T @ Features_h
+        # self.cur_Q = Features_h.T @ Y
+        # self.cur_G = Features_h.T @ Features_h
 
-        #self.Q = self.Q + Features_h.T @ Y
-        #self.G = self.G + Features_h.T @ Features_h
-        self.Q = self.old_Q + self.cur_Q
-        self.G = self.old_G + self.cur_G
+        self.Q = self.Q + Features_h.T @ Y
+        self.G = self.G + Features_h.T @ Features_h
+        # self.Q = self.old_Q + self.cur_Q
+        # self.G = self.old_G + self.cur_G
         ridge = self.optimise_ridge_parameter_gpu(Features_h, Y)
         Wo = torch.linalg.solve(self.G + ridge * torch.eye(self.G.size(dim=0)), self.Q).T  # better nmerical stability than .inv
         self.network._network.fc.weight.data = Wo[0:self.network._network.fc.weight.shape[0], :].to(self.network._network.device)
@@ -356,8 +359,8 @@ class RanPAC(BaseModel):
         return {
             "Wo": Wo,
             "backbone_params": backbone_params,
-            #"Q": self.Q,
-            #"G": self.G,
+            "Q": self.Q,
+            "G": self.G,
             "num_train_samples": len(dataloader.dataset.data),
         }
 
@@ -374,8 +377,8 @@ class RanPAC(BaseModel):
                     backbone_params.append(p.data)
         return {
             "Wo": Wo,
-            #"Q": self.Q,
-            #"G": self.G,
+            "Q": self.Q,
+            "G": self.G,
             "W_rand": W_rand,
             "backbone_params": backbone_params,
         }

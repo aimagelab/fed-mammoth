@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from transformers.tokenization_utils_base import BatchEncoding
+from kornia import augmentation as K
 
 
 class BaseDataset:
@@ -25,6 +26,14 @@ class BaseDataset:
         self.test_data, self.test_targets = [], []
         self.num_clients = num_clients
         self.batch_size = batch_size
+        self.train_transf = None
+        self.test_transf = None
+
+    def set_transforms(self, train_transform : str = None, test_transform : str = None):
+        if train_transform is not None:
+            self.train_transf = train_transform
+        if test_transform is not None:
+            self.test_transf = test_transform
 
     def _split_fcil_OOS(
         self,

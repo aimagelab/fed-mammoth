@@ -168,6 +168,7 @@ class PiLora(BaseModel):
         self.optimizer.zero_grad()
         #self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             #prelogits, outputs = functional_call(self.network, optimization_dict, inputs, kwargs={'penultimate' : True})
             prelogits, _ = self.network(inputs, penultimate=True)
             loss = 0

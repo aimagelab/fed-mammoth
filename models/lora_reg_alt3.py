@@ -139,6 +139,7 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.optimizer.zero_grad()
         optimization_dict = self.get_optimization_dict()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             outputs = functional_call(self.network, optimization_dict, inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels % self.cpt)
         if update:

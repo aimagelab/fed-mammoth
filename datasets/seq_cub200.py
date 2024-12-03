@@ -9,6 +9,32 @@ from typing import Tuple
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.Resize(size=(256, 256), resample="bicubic"),
+        K.RandomCrop(size=(224, 224)),
+        K.RandomHorizontalFlip(),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Resize(size=(256, 256), resample="bicubic"),
+        K.CenterCrop(size=(224, 224)),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ),
+    "angel_train": K.AugmentationSequential(
+        K.Resize((300, 300), resample="bicubic"),
+        K.RandomCrop((224, 224)),
+        K.RandomHorizontalFlip(),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+    ),
+    "angel_test": K.AugmentationSequential(
+        K.Resize((300, 300), resample="bicubic"),
+        K.RandomCrop((224, 224)),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+    ),
+}
 
 
 class MyCUB200(Dataset):
@@ -63,38 +89,20 @@ class SequentialCub200(BaseDataset):
     SIZE = (MyCUB200.IMG_SIZE, MyCUB200.IMG_SIZE)
     MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
-    TRAIN_TRANSFORM = transforms.Compose(
+    BASE_TRANSFORM = transforms.Compose(
         [
-            transforms.Resize((256, 256), interpolation=InterpolationMode.BICUBIC),
-            transforms.RandomCrop(SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(MEAN, STD),
-        ]
-    )
-    NOT_AUG_TRANSFORM = transforms.Compose(
-        [
-            transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
-            #  transforms.CenterCrop(MyCUB200.IMG_SIZE),
+            transforms.Resize(size=(224, 224), interpolation=3),
             transforms.ToTensor(),
         ]
     )
-    #  transforms.Normalize(MEAN, STD)])
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
-            transforms.CenterCrop(MyCUB200.IMG_SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize(MEAN, STD),
-        ]
-    )
-
     INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.5,
         class_quantity: int = 1,
@@ -106,13 +114,15 @@ class SequentialCub200(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
+        self.train_transf = train_transform
+        self.test_transf = test_transform
 
         for split in ["train", "test"]:
             dataset = MyCUB200(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -126,6 +136,13 @@ class SequentialCub200(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+
+    def train_transform(self, x):
+        return TRANSFORMS[self.train_transf](x)
+    
+    def test_transform(self, x):
+        return TRANSFORMS[self.test_transf](x)
 
 
 @register_dataset("joint-cub200")
@@ -133,69 +150,3 @@ class JointISIC(SequentialCub200):
     N_CLASSES_PER_TASK = 200
     N_TASKS = 1
 
-
-@register_dataset("seq-cub200_angel")
-class SequentialCub200Angel(BaseDataset):
-    SETTING = 'class-il'
-    N_CLASSES_PER_TASK = 20
-    N_TASKS = 10
-    SIZE = (MyCUB200.IMG_SIZE, MyCUB200.IMG_SIZE)
-    MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-
-    TRAIN_TRANSFORM = transforms.Compose([
-        transforms.Resize((300, 300), interpolation=InterpolationMode.BICUBIC),
-        transforms.RandomCrop(SIZE),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(MEAN, STD)])
-    NOT_AUG_TRANSFORM = transforms.Compose([transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
-                                        #  transforms.CenterCrop(MyCUB200.IMG_SIZE),
-                                         transforms.ToTensor()])
-                                        #  transforms.Normalize(MEAN, STD)])
-    TEST_TRANSFORM = transforms.Compose([transforms.Resize(300, interpolation=InterpolationMode.BICUBIC),
-                                         transforms.CenterCrop(MyCUB200.IMG_SIZE),
-                                         transforms.ToTensor(),
-                                         transforms.Normalize(MEAN, STD)])
-
-    INPUT_SHAPE = (224, 224, 3)
-
-    def __init__(
-        self,
-        num_clients: int,
-        batch_size: int,
-        partition_mode: str = "distribution",
-        distribution_alpha: float = 0.5,
-        class_quantity: int = 1,
-    ):
-        super().__init__(
-            num_clients,
-            batch_size,
-            partition_mode,
-            distribution_alpha,
-            class_quantity,
-        )
-
-        for split in ["train", "test"]:
-            dataset = MyCUB200(
-                DATASET_PATH,
-                train=True if split == "train" else False,
-                download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
-            )
-            setattr(self, f"{split}_dataset", dataset)
-
-        self._split_fcil(
-            num_clients,
-            partition_mode,
-            distribution_alpha,
-            class_quantity,
-        )
-
-        for split in ["train", "test"]:
-            getattr(self, f"{split}_dataset").data = None
-            getattr(self, f"{split}_dataset").targets = None
-
-@register_dataset("joint-cub200_angel")
-class JointISICAngel(SequentialCub200Angel):
-    N_CLASSES_PER_TASK = 200
-    N_TASKS = 1

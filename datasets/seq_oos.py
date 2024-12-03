@@ -13,6 +13,7 @@ from utils.global_consts import DATASET_PATH
 from transformers.tokenization_utils_base import BatchEncoding
 
 
+
 class MyOOS(Dataset):
     def __init__(self, root: str, train: bool = True, tokenizer: T5Tokenizer = None, download: bool = True) -> None:
         self.root = root
@@ -76,6 +77,8 @@ class SequentialOOS(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = None, #I put them anyway to avoid possible errors, but they won't be used
+        test_transform: str = None,
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.5,
         class_quantity: int = 1,
@@ -96,6 +99,12 @@ class SequentialOOS(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+    def train_transform(self, x):
+        return x
+    
+    def test_transform(self, x):
+        return x
 
 
 @register_dataset("seq-oos_5")

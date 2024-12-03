@@ -16,6 +16,17 @@ except ImportError:
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.RandomHorizontalFlip(),
+        K.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+    )
+}
 
 
 def load_and_preprocess_cars196(train_str="train") -> Tuple[torch.Tensor, torch.Tensor]:
@@ -124,14 +135,11 @@ class SequentialCars(BaseDataset):
 
     MEAN, STD = (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
 
-    TRAIN_TRANSFORM = transforms.Compose(
-        [
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MEAN, std=STD),
-        ]
+    BASE_TRANSFORM = transforms.Compose(
+        [transforms.Resize(size=(224, 224), interpolation=InterpolationMode.BICUBIC), 
+         transforms.ToTensor(),
+         ]
     )
-    TEST_TRANSFORM = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=MEAN, std=STD)])
 
     INPUT_SHAPE = (224, 224, 3)
 
@@ -139,6 +147,8 @@ class SequentialCars(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.2,
         class_quantity: int = 2,
@@ -150,12 +160,14 @@ class SequentialCars(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
+        self.train_transf = train_transform
+        self.test_transf = test_transform
 
         for split in ["train", "test"]:
             dataset = MyCars196(
                 DATASET_PATH,
                 train=True if split == "train" else False,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -169,3 +181,10 @@ class SequentialCars(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+    
+
+    def train_transform(self, x):
+        return TRANSFORMS[self.train_transf](x)
+    
+    def test_transform(self, x):
+        return TRANSFORMS[self.test_transf](x)

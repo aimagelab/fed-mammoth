@@ -62,6 +62,8 @@ class Sequential20NewsGroup(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
+        train_transform = None, #I put them anyway to avoid possible errors, but they won't be used
+        test_transform = None,
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.5,
         class_quantity: int = 1,
@@ -82,6 +84,12 @@ class Sequential20NewsGroup(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+    def train_transform(self, x):
+        return x
+    
+    def test_transform(self, x):
+        return x
 
 
 @register_dataset("seq-20ng_4")

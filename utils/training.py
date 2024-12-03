@@ -29,6 +29,7 @@ def compute_forgetting(accuracies: List[List[float]]) -> List[float]:
 def accs_and_forgetting_matrix(accuracies: List[List[float]], forgetting: List[float], output_folder: str = None) -> None:
     if output_folder is None:
         output_folder = os.getcwd()
+        print("Output folder not specified, saving in current directory:", output_folder)
     tasks = len(accuracies)
     #fill list of accuracies with zeros
     for acc in accuracies:
@@ -236,6 +237,7 @@ def train(
         ]
         active_clients_sampled = (active_clients_sampled[torch.argsort(active_clients_sampled)]).tolist()
         for index, client_model in zip(active_clients_sampled, client_models):
+            client_model.augment = dataset.train_transform
             if isinstance(dataset.N_CLASSES_PER_TASK, list):
                 client_model.begin_task(dataset.N_CLASSES_PER_TASK[task])
             else:

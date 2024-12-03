@@ -31,6 +31,7 @@ class BaseModel(nn.Module):
         self.cur_task = -1
         self.cur_offset = 0
         self.cpt = 0
+        self.augment = None
 
     def save_checkpoint(self, output_folder: str, task: int, comm_round: int) -> None:
         training_status = self.network.training

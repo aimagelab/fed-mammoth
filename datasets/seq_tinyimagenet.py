@@ -9,6 +9,20 @@ from onedrivedownloader import download as onedrive_download
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train" : K.AugmentationSequential(
+        K.RandomResizedCrop(size=(224, 224), resample="bicubic"),
+        K.RandomHorizontalFlip(),
+        K.Normalize(mean=(0.4802, 0.4480, 0.3975), std=(0.2770, 0.2691, 0.2821)),
+    ),
+    "default_test" : K.AugmentationSequential(
+        K.Resize(size=(256, 256), resample="bicubic"),
+        K.CenterCrop(size=(224, 224)),
+        K.Normalize(mean=(0.4802, 0.4480, 0.3975), std=(0.2770, 0.2691, 0.2821)),
+    ),
+}
 
 
 class MyTinyImageNet(Dataset):
@@ -113,6 +127,14 @@ class SequentialTinyImageNet(BaseDataset):
             normalize,
         ]
     )
+
+    BASE_TRANSFORM = transforms.Compose(
+        [
+            transforms.Resize(size=(224, 224), interpolation=3),
+            transforms.ToTensor(),
+        ]
+    )
+
     INPUT_SHAPE = (224, 224, 3)
 
     def __init__(

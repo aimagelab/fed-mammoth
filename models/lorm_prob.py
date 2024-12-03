@@ -12,13 +12,13 @@ from utils.tools import str_to_bool, compute_fisher_expectation_fabric
 
 from models.lora import Lora, merge_AB, zero_pad
 from models.regmean import RegMean
-from models.lora import Lora
+from models.lora_pre import Lora
 from tqdm import tqdm
 import math
 
 
-@register_model("lora_reg_alt4")
-class LoraRegMeanAlt(Lora, RegMean):
+@register_model("lorm_prob")
+class LoRM(Lora, RegMean):
     def __init__(
         self,
         fabric,
@@ -38,11 +38,16 @@ class LoraRegMeanAlt(Lora, RegMean):
         alpha_regmean_backbone: float = -1,
         gram_dtype: str = "32",
         reg_dtype_64: str_to_bool = True,
-        lr_back : float = -1,
+        lr_B : float = -1,
+        lr_A : float = -1,
         only_square: int = 0,
         train_bias: str = "all",
         train_matrix: str = "alt",
+        regmean_rounds: int = 1,
     ) -> None:
+        self.is_server = False
+        self.regmean_rounds = regmean_rounds
+        lr_back = lr_B if lr_B > 0 else lr
         Lora.__init__(
             self,
             fabric,
@@ -75,12 +80,8 @@ class LoraRegMeanAlt(Lora, RegMean):
             lr_back,
             only_square,
             train_bias,
+            clip_grad
         )
-        final_modules = []
-        for name in self.gram_modules:
-            if "fc" in name or "head" in name:
-                final_modules.append(name)
-        self.gram_modules = final_modules
         self.middle_names = {}
         for name in self.gram_modules:
             self.middle_names[name.removeprefix("_forward_module.").removeprefix("module.") + ".weight"] = name
@@ -93,23 +94,37 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round = 0
         self.set_train_matrix()
         self.optimization_dict = deepcopy(dict(self.network.state_dict()))
+        lr_back = []
+        if lr_B >= 0:
+            lr_back.append(lr_B)
+        else:
+            lr_back.append(lr)
+        if lr_A >= 0:
+            lr_back.append(lr_A)
+        else:
+            lr_back.append(lr)
+        self.lr_back = lr_back
         del self.old_delta
 
-    def split_backbone_head(self):
-        backbone_params = []
+    def split_backbone_head(self, split=False):
+        Bs = []
+        As = []
         head_params = []
         for key in self.lora_keys:
             self.cur_B[key] = self.cur_B[key].detach()
             self.cur_A[key] = self.cur_A[key].detach()
             self.cur_B[key].requires_grad = True
             self.cur_A[key].requires_grad = True
-            backbone_params.append(self.cur_B[key])
-            backbone_params.append(self.cur_A[key])
+            Bs.append(self.cur_B[key])
+            As.append(self.cur_A[key])
         for key in self.head_keys:
             self.head[key] = self.head[key].detach()
             self.head[key].requires_grad = True
             head_params.append(self.head[key])
-        return backbone_params, head_params
+        if split:
+            return Bs, As, head_params
+        else:
+            return Bs + As, head_params
 
     def get_optimization_dict(self, fabric=True):
         if fabric:
@@ -121,8 +136,6 @@ class LoraRegMeanAlt(Lora, RegMean):
                 self.head[key].requires_grad = True
                 optimization_dict[key] = self.head[key]
         for key in self.lora_keys:
-            self.cur_B[key].requires_grad = True
-            self.cur_A[key].requires_grad = True
             optimization_dict[key] += self.cur_B[key] @ self.cur_A[key]
         return optimization_dict
 
@@ -131,8 +144,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         optimization_dict = self.get_optimization_dict()
         with self.fabric.autocast():
             inputs = self.augment(inputs)
-            outputs = functional_call(self.network, optimization_dict, inputs)
-            loss = self.loss(outputs, labels)
+            outputs = functional_call(self.network, optimization_dict, inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            loss = self.loss(outputs, labels % self.cpt)
         if update:
             self.fabric.backward(loss)
             # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
@@ -148,22 +161,18 @@ class LoraRegMeanAlt(Lora, RegMean):
     def begin_task(self, n_classes_per_task: int):
         BaseModel.begin_task(self, n_classes_per_task)
         #server
-        if "fisher" in self.cl_merge and getattr(self, "old_delta_fisher", None) is not None: 
+        if self.cur_task > 0 and self.is_server:
             self.to("cpu")
             for key in self.lora_keys:
-                self.old_delta_fisher[key] = self.old_delta_fisher[key] + (
-                    (self.cur_B[key] @ self.cur_A[key]) * self.cur_fisher[key]
-                )
-                self.old_fisher[key] += self.cur_fisher[key]
                 # filler in order to test something meaningful after each comm round (not the last one)
                 self.old_delta[key] = (
                     self.old_delta[key] * (self.cur_task - 1) + self.cur_B[key].detach() @ self.cur_A[key].detach()
                 ) / self.cur_task
             self.to(self.device)
-            self.init_matrices()
+            self.init_matrices(freeze_A=False)
         else:
             if self.cur_task > 0 :
-                self.init_matrices()
+                self.init_matrices(freeze_A=False)
         self.cur_round = 0
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
@@ -171,8 +180,8 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_B = deepcopy(server_info["cur_B"])
         self.cur_A = deepcopy(server_info["cur_A"])
         for key in self.lora_keys:
-            self.cur_B[key].requires_grad = True
-            self.cur_A[key].requires_grad = True
+            self.cur_B[key].requires_grad = True if self.cur_task == 0 else False
+            self.cur_A[key].requires_grad = True if self.cur_task == 0 else False
         #self.optimization_dict = deepcopy(server_info["old_delta"])
         self.old_delta = server_info["old_delta"]
         if not self.lora_head:
@@ -183,18 +192,14 @@ class LoraRegMeanAlt(Lora, RegMean):
                 key: nn.Parameter(self.network.state_dict()[key].clone().detach(), requires_grad=True).to(self.device)
                 for key in self.head_keys
             }
-        if self.lr_back > 0:
-            backbone_params, head_params = self.split_backbone_head()
-            params = [{"params": backbone_params, "lr": self.lr_back}, {"params": head_params}]
-        else:
-            if not self.lora_head:
-                params = list(self.cur_B.values()) + list(self.cur_A.values()) + list(self.head.values())
-            else:
-                params = list(self.cur_B.values()) + list(self.cur_A.values())
+        self.set_train_matrix()
+        Bs, As, head_params = self.split_backbone_head(split=True)
+        back = Bs if self.cur_train_matrix == "B" else As
+        back_lr = self.lr_back[0] if self.cur_train_matrix == "B" else self.lr_back[1]
+        params = [{"params": back, "lr": back_lr}, {"params": head_params}]
         OptimizerClass = getattr(torch.optim, self.optimizer_str)
         self.optimizer = OptimizerClass(params, lr=self.lr, weight_decay=self.wd_reg)
         self.optimizer = self.fabric.setup_optimizers(self.optimizer)
-        self.set_train_matrix()
         self.cur_round += 1
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
@@ -208,9 +213,10 @@ class LoraRegMeanAlt(Lora, RegMean):
         self.cur_round += 1
 
     def end_round_client(self, dataloader: DataLoader):
-        self.network.eval()
-        self.optimizer.zero_grad()
-        self.optimizer = None
+        #self.network.eval()
+        if self.optimizer is not None:
+            self.optimizer.zero_grad()
+            self.optimizer = None
         Lora.end_round_client(self, dataloader)
         # setting up the parameters to correctly compute the Gram matrices for the next round
         self.set_optimization()
@@ -218,11 +224,13 @@ class LoraRegMeanAlt(Lora, RegMean):
             self.optimization_dict[key] = self.head[key]
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
-        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
+        for i in range(self.regmean_rounds):
+            RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
-        self.network.eval()
+        #self.network.eval()
+        self.is_server = True
         with torch.no_grad():
             if self.avg_type == "weighted":
                 total_samples = sum([client["num_train_samples"] for client in client_info])
@@ -255,7 +263,7 @@ class LoraRegMeanAlt(Lora, RegMean):
                 #eps = 5e-7
                 keys = list(self.network.state_dict().keys())
                 if self.cur_train_matrix == "A":
-                    # merge As
+                    # merge As, Bs are all the same
                     cl_A = [client["cur_A"] for client in client_info]  # list of A matrices for all clients
                     for key in self.lora_keys:
                         if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
@@ -267,12 +275,12 @@ class LoraRegMeanAlt(Lora, RegMean):
                             B = self.cur_B[key].to(self.device).to(dtype)
                             E = torch.stack(
                                 [
-                                    (B_[key].to(self.device).to(dtype) @ A_[key].to(self.device).to(dtype)) @ client["grams"][name].to(self.device).to(dtype)
-                                    for B_, A_, client in zip(cl_B, cl_A, client_info)
+                                    (A_[key].to(self.device).to(dtype)) @ client["grams"][name].to(self.device).to(dtype)
+                                    for A_, client in zip(cl_A, client_info)
                                 ]
                             ).sum(0)
                             G = torch.stack([client["grams"][name].to(self.device).to(dtype) for client in client_info]).sum(0)
-                            A = torch.pinverse(B.T @ B) @ B.T @ E @ torch.pinverse(G)  # A
+                            A = E @ torch.pinverse(G)  # A
                             self.cur_A[key] = A.to(torch.float32).to("cpu")
                             for i in range(len(cl_A)):
                                 cl_A[i][key] = cl_A[i][key].to("cpu")
@@ -289,13 +297,13 @@ class LoraRegMeanAlt(Lora, RegMean):
                                 )
                     
                 else:
-                    # merge Bs
+                    # merge Bs, As are all the same
                     print("Merging Bs")
                     cl_B = [client["cur_B"] for client in client_info]  # list of A matrices for all clients
                     for key in self.lora_keys:
                         if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
                             name = self.middle_names[key]
-                            print(key)
+                            #print(key)
                             for i in range(len(cl_B)):
                                 cl_B[i][key] = cl_B[i][key].to(self.device).to(dtype)
                                 client_info[i]["grams"][name] = client_info[i]["grams"][name].to(self.device).to(dtype)
@@ -395,9 +403,9 @@ class LoraRegMeanAlt(Lora, RegMean):
         for name in self.gram_modules:
             self.features[name] = torch.tensor([], dtype=self.gram_dtype)
         self.set_optimization()
-        head_modules = [mod for mod in self.gram_modules if "head" in mod]
+        gram_modules = [mod for mod in self.gram_modules if "head" not in mod]
         real_modules = deepcopy(self.gram_modules)
-        self.gram_modules = head_modules
+        self.gram_modules = gram_modules
         RegMean.end_round_client(self, dataloader)
         self.gram_modules = real_modules
         self.to("cpu", only_trainable=False)
@@ -406,29 +414,35 @@ class LoraRegMeanAlt(Lora, RegMean):
 
     def end_task_server(self, client_info: List[dict] = None):
         with torch.no_grad():
-            head_module = [mod for mod in self.gram_modules if "head" in mod][0]
-            gram = torch.stack([client_info[i]["grams"][head_module] for i in range(len(client_info))]).sum(0).to(self.device)
-            sd = self.network.state_dict()
-            keys = list(self.network.state_dict().keys())
-            for key in keys:
-                # head parameters
-                if "head" in key:
-                    if self.middle_names.get(key) is not None and "head" in key:  # regmean on Linear layer
-                        head = sd[key]
-                        if getattr(self, "run_weights_gram", None) is None:
-                            self.run_weights_gram = (head @ gram)
-                        else:
-                            self.run_weights_gram = self.run_weights_gram.to(self.device)
-                            self.run_weights_gram += (head @ gram)
-                        if getattr(self, "run_gram", None) is None:
-                            self.run_gram = gram
-                        else:
-                            self.run_gram = self.run_gram.to(self.device)
-                            self.run_gram += gram
-                        if self.cur_task > 0:
-                            sd[key] = self.run_weights_gram @ torch.pinverse(self.run_gram)
-            self.network.load_state_dict(sd)
-            self.set_optimization()
+            gram_modules = [mod for mod in self.gram_modules if "head" not in mod]
+            grams = {}
+            for module in gram_modules:
+                grams[module] = torch.stack([client_info[i]["grams"][module] for i in range(len(client_info))]).sum(0)
+            optimization_dict = deepcopy(self.network.state_dict())
+            if getattr(self, "run_weights_gram", None) is None:
+                self.run_weights_gram = {key: None for key in self.lora_keys if "weight" in key and self.middle_names.get(key) is not None and not "head" in key}
+            if getattr(self, "run_gram", None) is None:
+                self.run_gram = {key: None for key in self.lora_keys if "weight" in key and self.middle_names.get(key) is not None and not "head" in key}
+            for key in self.lora_keys:
+                if "weight" in key and self.middle_names.get(key) is not None and not "head" in key:
+                    B = self.cur_B[key].to(self.device)
+                    A = self.cur_A[key].to(self.device)
+                    gram = grams[self.middle_names[key]].to(self.device)
+                    if self.run_weights_gram.get(key) is None:
+                        self.run_weights_gram[key] = (B @ A @ gram)
+                    else:
+                        self.run_weights_gram[key] = self.run_weights_gram[key].to(self.device)
+                        self.run_weights_gram[key] += (B @ A @ gram)
+                    if self.run_gram.get(key) is None:
+                        self.run_gram[key] = gram
+                    else:
+                        self.run_gram[key] = self.run_gram[key].to(self.device)
+                        self.run_gram[key] += gram
+                    if self.cur_task > 0:
+                        optimization_dict[key] += self.run_weights_gram[key] @ torch.pinverse(self.run_gram[key])
+            if self.cur_task > 0:
+                self.optimization_dict = optimization_dict
+            
                     
             
     def set_optimization_cur_task(self, fabric=True):

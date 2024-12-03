@@ -618,6 +618,7 @@ class Target(FedAvg):
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels % self.cpt)
             if self.syn_data_loader is not None:

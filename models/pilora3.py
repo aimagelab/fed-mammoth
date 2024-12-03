@@ -106,7 +106,7 @@ class PiLora(BaseModel):
         self.lr_back = lr_back
         if self.lr_back < 0:
             self.lr_back = lr
-        blk_full = self.network.model.blocks[0]
+        blk_full = self.network.model.blocks[0] if not "T5" in str(type(self.network.module)) else self.network.model.encoder.block[0]
         w_qkv_linear = blk_full.attn.qkv
         self.dim = w_qkv_linear.in_features
         w_a_linear_qs = []
@@ -171,6 +171,7 @@ class PiLora(BaseModel):
         self.optimizer.zero_grad()
         #self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             #prelogits, outputs = functional_call(self.network, optimization_dict, inputs, kwargs={'penultimate' : True})
             #prelogits, _ = self.network(inputs, penultimate=True)
             prelogits = self.network.forward(inputs, prelogits=True)

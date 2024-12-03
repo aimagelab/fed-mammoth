@@ -11,6 +11,20 @@ import google_drive_downloader as gdd
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.RandomResizedCrop(size=(224, 224), scale = (0.05, 1.0), ratio = (3.0 / 4.0, 4.0 / 3.0), resample="bicubic"),
+        K.RandomHorizontalFlip(p=0.5),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Resize(size=(256, 256), resample="bicubic"),
+        K.CenterCrop(size=(224, 224)),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ),
+}
 
 
 class MyImageNetA(Dataset):
@@ -68,31 +82,20 @@ class SequentialImageNetA(BaseDataset):
     scale = (0.05, 1.0)
     ratio = (3.0 / 4.0, 4.0 / 3.0)
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-
-    TRAIN_TRANSFORM = transforms.Compose(
+    BASE_TRANSFORM = transforms.Compose(
         [
-            transforms.RandomResizedCrop(224, scale=scale, ratio=ratio),
-            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.Resize(size=(224, 224), interpolation=3),
             transforms.ToTensor(),
-            normalize,
         ]
     )
-
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
-
     INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 1.0,
         class_quantity: int = 4,
@@ -104,13 +107,15 @@ class SequentialImageNetA(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
+        self.train_transf = train_transform
+        self.test_transf = test_transform
 
         for split in ["train", "test"]:
             dataset = MyImageNetA(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -124,6 +129,12 @@ class SequentialImageNetA(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+    def train_transform(self, x):
+        return TRANSFORMS[self.train_transf](x)
+    
+    def test_transform(self, x):
+        return TRANSFORMS[self.test_transf](x)
 
 
 @register_dataset("joint-imageneta")

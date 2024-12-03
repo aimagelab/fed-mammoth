@@ -10,6 +10,21 @@ from typing import Tuple
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.Resize((256, 256), resample='bicubic'),
+        K.RandomCrop((224, 224)),
+        K.RandomHorizontalFlip(0.5),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Resize((256, 256), resample='bicubic'),
+        K.RandomCrop((224, 224)),
+        K.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    )
+}
 
 
 class MyISIC(Dataset):
@@ -66,22 +81,10 @@ class SequentialISIC(BaseDataset):
 
     MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
-    TRAIN_TRANSFORM = transforms.Compose(
+    BASE_TRANSFORM = transforms.Compose(
         [
-            transforms.Resize(256, interpolation=InterpolationMode.BICUBIC),
-            transforms.RandomCrop(224),
-            transforms.RandomHorizontalFlip(0.5),
+            transforms.Resize(size=(224, 224), interpolation=InterpolationMode.BICUBIC),
             transforms.ToTensor(),
-            transforms.Normalize(mean=MEAN, std=STD),
-        ]
-    )
-
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            transforms.Resize(size=(256, 256), interpolation=InterpolationMode.BICUBIC),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=MEAN, std=STD),
         ]
     )
 
@@ -91,6 +94,8 @@ class SequentialISIC(BaseDataset):
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.5,
         class_quantity: int = 1,
@@ -102,13 +107,15 @@ class SequentialISIC(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
+        self.train_transf = train_transform
+        self.test_transf = test_transform
 
         for split in ["train", "test"]:
             dataset = MyISIC(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -122,6 +129,12 @@ class SequentialISIC(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+    def train_transform(self, img):
+        return TRANSFORMS[self.train_transf](img)
+    
+    def test_transform(self, img):
+        return TRANSFORMS[self.test_transf](img)
 
 
 @register_dataset("joint-isic")

@@ -174,6 +174,7 @@ class Vera(BaseModel):
         optimization_dict = self.get_optimization_dict()
         # optimization_dict = super().get_optimization_dict()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             outputs = functional_call(self.network, optimization_dict, inputs)[
                 :, self.cur_offset : self.cur_offset + self.cpt
             ]

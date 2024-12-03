@@ -15,6 +15,22 @@ from torchvision.transforms.functional import InterpolationMode
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.RandomResizedCrop(size=(224, 224), resample='bicubic'),
+        K.RandomHorizontalFlip(),
+        K.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Resize(size=(224, 224), resample='bicubic'),
+        K.CenterCrop(size=(224, 224)),
+        K.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711)),
+    ),
+    "lorm_iclr_train": lambda x : x,
+    "lorm_iclr_test": lambda x : x,
+}
 
 
 class MyEuroSAT(Dataset):
@@ -70,30 +86,21 @@ class SequentialEuroSAT(BaseDataset):
     N_TASKS = 5
 
     MEAN, STD = [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]
-    normalize = transforms.Normalize(mean=MEAN, std=STD)
-    TRAIN_TRANSFORM = transforms.Compose(
+    BASE_TRANSFORM = transforms.Compose(
         [
-            # transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
-            # transforms.RandomHorizontalFlip(),
+            transforms.ToPILImage(),
+            transforms.Resize(size=(224, 224), interpolation=3),
             transforms.ToTensor(),
-            # normalize,
         ]
     )
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            # transforms.Resize(224, interpolation=3),  # bicubic
-            # transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            # normalize,
-        ],
-    )
-
-    INPUT_SHAPE = (64, 64, 3)
+    INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.5,
         class_quantity: int = 1,
@@ -105,13 +112,15 @@ class SequentialEuroSAT(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
+        self.train_transf = train_transform
+        self.test_transf = test_transform
 
         for split in ["train", "test"]:
             dataset = MyEuroSAT(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -126,36 +135,14 @@ class SequentialEuroSAT(BaseDataset):
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
 
+    def train_transform(self, x):
+        return TRANSFORMS[self.train_transf](x)
+    
+    def test_transform(self, x):
+        return TRANSFORMS[self.test_transf](x)
 
-@register_dataset("seq-eurosat_224")
-class SequentialEuroSAT224(SequentialEuroSAT):
-    N_CLASSES_PER_TASK = 2
-    N_TASKS = 5
 
-    MEAN, STD = [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]
-    normalize = transforms.Normalize(mean=MEAN, std=STD)
-    TRAIN_TRANSFORM = transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.RandomResizedCrop(224, scale=(0.08, 1.0), interpolation=InterpolationMode.BICUBIC),  # from https://github.dev/KaiyangZhou/Dassl.pytorch defaults
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.Resize(224, interpolation=3),  # bicubic
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ],
-    )
-
-    INPUT_SHAPE = (224, 224, 3)
-
-@register_dataset("joint-eurosat_224")
-class JointEuroSAT224(SequentialEuroSAT224):
+@register_dataset("joint-eurosat")
+class JointEuroSAT224(SequentialEuroSAT):
     N_CLASSES_PER_TASK = 10
     N_TASKS = 1

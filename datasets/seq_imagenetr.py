@@ -13,6 +13,20 @@ import yaml
 from datasets import register_dataset
 from datasets.utils import BaseDataset
 from utils.global_consts import DATASET_PATH
+from kornia import augmentation as K
+
+TRANSFORMS = {
+    "default_train": K.AugmentationSequential(
+        K.RandomResizedCrop(size=(224, 224), resample='bicubic'),
+        K.RandomHorizontalFlip(p=0.5),
+        K.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ),
+    "default_test": K.AugmentationSequential(
+        K.Resize(size=(256, 256), resample='bicubic'),
+        K.CenterCrop(size=(224, 224)),
+        K.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    )
+}
 
 
 class MyImageNetR(Dataset):
@@ -88,33 +102,24 @@ class MyImageNetR(Dataset):
 class SequentialImageNetR(BaseDataset):
     N_TASKS = 10
     N_CLASSES_PER_TASK = 20
+    MEAN_NORM = (0.5, 0.5, 0.5)
+    STD_NORM = (0.5, 0.5, 0.5)
 
-    normalize = transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 
-    TRAIN_TRANSFORM = transforms.Compose(
+    BASE_TRANSFORM = transforms.Compose(
         [
-            transforms.RandomResizedCrop(224, interpolation=InterpolationMode.BICUBIC),
-            transforms.RandomHorizontalFlip(),
+            transforms.Resize(size=(224, 224), interpolation=3),
             transforms.ToTensor(),
-            normalize,
         ]
     )
-
-    TEST_TRANSFORM = transforms.Compose(
-        [
-            transforms.Resize(size=(256, 256), interpolation=InterpolationMode.BICUBIC),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ]
-    )
-
     INPUT_SHAPE = (224, 224, 3)
 
     def __init__(
         self,
         num_clients: int,
         batch_size: int,
+        train_transform: str = "default_train",
+        test_transform: str = "default_test",
         partition_mode: str = "distribution",
         distribution_alpha: float = 0.05,
         class_quantity: int = 4,
@@ -126,13 +131,15 @@ class SequentialImageNetR(BaseDataset):
             distribution_alpha,
             class_quantity,
         )
-
+        self.train_transf = train_transform
+        self.test_transf = test_transform
+        
         for split in ["train", "test"]:
             dataset = MyImageNetR(
                 DATASET_PATH,
                 train=True if split == "train" else False,
                 download=True,
-                transform=getattr(self, f"{split.upper()}_TRANSFORM"),
+                transform=self.BASE_TRANSFORM,
             )
             setattr(self, f"{split}_dataset", dataset)
 
@@ -146,6 +153,12 @@ class SequentialImageNetR(BaseDataset):
         for split in ["train", "test"]:
             getattr(self, f"{split}_dataset").data = None
             getattr(self, f"{split}_dataset").targets = None
+
+    def train_transform(self, x):
+        return TRANSFORMS[self.train_transf](x)
+    
+    def test_transform(self, x):
+        return TRANSFORMS[self.test_transf](x)
 
 
 @register_dataset("joint-imagenetr")

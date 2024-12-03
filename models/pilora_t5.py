@@ -199,6 +199,7 @@ class PiLora(BaseModel):
         self.optimizer.zero_grad()
         #self.cur_B[self.lora_keys[0]].retain_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             opt_dict = self.set_optimization_dict()
             prelogits = functional_call(self.network, opt_dict, inputs, kwargs={'prelogits' : True})['last_hidden_state'][:, 0]
             #prelogits = self.network.forward(inputs, prelogits=True)
@@ -232,7 +233,7 @@ class PiLora(BaseModel):
             #loss_l1 = torch.linalg.matrix_norm(getattr(blk, f'linear_a_q_{self.cur_task}').weight, ord=1) + torch.linalg.matrix_norm(getattr(blk, f'linear_a_v_{self.cur_task}').weight, ord=1)
             #loss_l1 = torch.norm(getattr(blk, f'linear_a_q_{self.cur_task}').weight, p=1) + torch.norm(getattr(blk, f'linear_a_v_{self.cur_task}').weight, p=1)
             loss_l1 = torch.norm(self.cur_A['model.encoder.block.0.layer.0.SelfAttention.q.weight'], p=1) + torch.norm(self.cur_A['model.encoder.block.0.layer.0.SelfAttention.v.weight'], p=1)
-            loss += 0.01 * loss_l1
+            loss += 0.001 * loss_l1
 
         if update:
             if fabric:

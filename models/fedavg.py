@@ -58,6 +58,7 @@ class FedAvg(BaseModel):
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels % self.cpt)
 
@@ -106,10 +107,10 @@ class FedAvg(BaseModel):
             self.optimizer = self.fabric.setup_optimizers(optimizer)
             self.linear_probe(dataloader)
             self.done_linear_probe = True
-            # restore correct optimizer
-            params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
-            optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
-            self.optimizer = self.fabric.setup_optimizers(optimizer)
+        # restore correct optimizer
+        params = [{"params": self.network.parameters()}]
+        optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
+        self.optimizer = self.fabric.setup_optimizers(optimizer)
 
     def get_client_info(self, dataloader: DataLoader):
         return {

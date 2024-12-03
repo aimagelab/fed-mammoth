@@ -54,6 +54,7 @@ class FedProto(FedAvg):
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             feats, outputs = self.network(inputs, penultimate=True)
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
             loss_ce = self.loss(outputs, labels % self.cpt)
