@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 import numpy as np
 
 

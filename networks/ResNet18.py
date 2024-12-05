@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.nn.functional import avg_pool2d, relu
 
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1) -> F.conv2d:

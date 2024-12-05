@@ -9,7 +9,7 @@ import torch.utils.checkpoint
 from timm.models import named_apply
 from timm.layers import trunc_normal_, lecun_normal_, PatchEmbed, Mlp as TimmMlp, DropPath
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 
 from timm.models._builder import build_model_with_cfg
 from functools import partial

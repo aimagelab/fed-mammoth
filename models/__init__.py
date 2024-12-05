@@ -1,7 +1,7 @@
 import os
 import importlib
 from typing import Callable
-from models.utils import BaseModel
+from models._utils import BaseModel
 
 __all__ = ["model_factory"]
 

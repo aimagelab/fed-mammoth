@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 from .vit import VisionTransformer
 import copy
 import timm

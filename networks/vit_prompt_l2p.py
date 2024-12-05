@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import timm
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 import torchvision.transforms as transforms
 from utils.tools import str_to_bool
 from timm.models.layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_

@@ -4,7 +4,7 @@ from .vit import VisionTransformer
 import copy
 import timm
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 import timm.models.vision_transformer as timm_vit
 from functools import partial
 from timm.models.vision_transformer import PatchEmbed

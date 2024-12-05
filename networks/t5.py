@@ -1,4 +1,4 @@
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 from networks import register_network
 import timm
 import torch

@@ -5,7 +5,7 @@ from torch.distributions import MultivariateNormal
 from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
-from models.utils import BaseModel
+from models._utils import BaseModel
 from networks.vit_prompt_l2p import VitL2P
 import os
 from utils.tools import str_to_bool

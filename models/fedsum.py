@@ -3,7 +3,7 @@ from torch import nn
 from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
-from models.utils import BaseModel
+from models._utils import BaseModel
 
 
 @register_model("fedsum")

@@ -1,5 +1,5 @@
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 import torchvision.models.vision_transformer as timm_vit
 import timm
 from torch import nn

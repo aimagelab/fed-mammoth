@@ -12,7 +12,7 @@ import json
 from torch.utils.data import Dataset
 
 
-from models.utils import BaseModel
+from models._utils import BaseModel
 from utils.training import train
 from utils.args import add_args
 from models import model_factory

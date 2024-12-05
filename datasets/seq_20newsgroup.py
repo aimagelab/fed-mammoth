@@ -8,7 +8,7 @@ from transformers import T5Tokenizer, AutoTokenizer
 import numpy as np
 
 from datasets import register_dataset
-from datasets.utils import BaseDataset
+from datasets._utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 from transformers.tokenization_utils_base import BatchEncoding
 from sklearn.datasets import fetch_20newsgroups

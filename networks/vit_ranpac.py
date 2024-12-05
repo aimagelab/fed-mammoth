@@ -7,7 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 #from backbone import MammothBackbone
 from networks import register_network
-from networks.utils import BaseNetwork
+from networks._utils import BaseNetwork
 #from backbone.vit import vit_base_patch16_224_prompt_prototype
 
 

@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from models import register_model
 from typing import List
-from models.utils import BaseModel
+from models._utils import BaseModel
 from networks.vit import VisionTransformer as Vit
 from torch.func import functional_call
 from copy import deepcopy

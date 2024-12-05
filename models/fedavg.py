@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from models import register_model
 from typing import List
 from torch.utils.data import DataLoader
-from models.utils import BaseModel
+from models._utils import BaseModel
 from utils.tools import str_to_bool
 from networks.vit_prompt_hgp import VitHGP
 from networks.vit import VisionTransformer

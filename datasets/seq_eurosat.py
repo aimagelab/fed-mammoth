@@ -13,7 +13,7 @@ import torchvision.transforms as transforms
 from torchvision.transforms.functional import InterpolationMode
 
 from datasets import register_dataset
-from datasets.utils import BaseDataset
+from datasets._utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 from kornia import augmentation as K
 

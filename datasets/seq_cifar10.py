@@ -1,7 +1,7 @@
 from datasets import register_dataset
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10
-from datasets.utils import BaseDataset
+from datasets._utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 import numpy as np
 from kornia import augmentation as K

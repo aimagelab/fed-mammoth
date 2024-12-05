@@ -9,7 +9,7 @@ import google_drive_downloader as gdd
 
 
 from datasets import register_dataset
-from datasets.utils import BaseDataset
+from datasets._utils import BaseDataset
 from utils.global_consts import DATASET_PATH
 from kornia import augmentation as K
 
