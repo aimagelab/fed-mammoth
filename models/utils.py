@@ -1,5 +1,6 @@
 import os
 from typing import List
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -119,3 +120,76 @@ class BaseModel(nn.Module):
     
     def end_training(self):
         pass
+
+
+def reservoir(num_seen_examples: int, buffer_size: int) -> int:
+    if num_seen_examples < buffer_size:
+        return num_seen_examples
+
+    rand = np.random.randint(0, num_seen_examples + 1)
+    if rand < buffer_size:
+        return rand
+    else:
+        return -1
+
+
+class Buffer:
+    def __init__(self, buffer_size, device="cpu"):
+        self.buffer_size = buffer_size
+        self.device = device
+        self.num_seen_examples = 0
+
+    def to(self, device):
+        self.device = device
+        if hasattr(self, "attributes"):
+            for attr_str in self.attributes:
+                if hasattr(self, attr_str):
+                    setattr(self, attr_str, getattr(self, attr_str).to(device))
+        return self
+
+    def __len__(self):
+        return min(self.num_seen_examples, self.buffer_size)
+
+    def init_tensors(self, **kwargs) -> None:
+        for attr_str in self.attributes:
+            setattr(self, attr_str, torch.zeros((self.buffer_size,
+                    *kwargs[attr_str].shape[1:]), dtype=kwargs[attr_str].dtype,
+                    device=self.device))
+
+    def add_data(self, **kwargs):
+        if hasattr(self, 'attributes'):
+            assert self.attributes == list(kwargs.keys())
+        else:
+            self.attributes = list(kwargs.keys())
+            self.init_tensors(**kwargs)
+
+        for i in range(kwargs[self.attributes[0]].shape[0]):
+            index = reservoir(self.num_seen_examples, self.buffer_size)
+            self.num_seen_examples += 1
+            if index >= 0:
+                for attr_str in self.attributes:
+                    attribute = getattr(self, attr_str)
+                    attribute[index] = kwargs[attr_str][i].to(self.device)
+
+    def get_data(self, size: int, device=None, shuffle=True):
+        target_device = self.device if device is None else device
+        actual_size = min(size, len(self))
+
+        if shuffle:
+            choice = np.random.choice(len(self), size=actual_size, replace=False)
+        else:
+            choice = np.arange(actual_size)
+
+        return [getattr(self, attr_str)[choice].to(target_device) for attr_str in self.attributes]
+
+    def is_empty(self) -> bool:
+        return True if self.num_seen_examples == 0 else False
+
+    def empty(self) -> None:
+        for attr_str in self.attributes:
+            if hasattr(self, attr_str):
+                setattr(getattr(self, attr_str), None)
+                delattr(self, attr_str)
+        self.attributes = None
+        delattr(self, "attributes")
+        self.num_seen_examples = 0
