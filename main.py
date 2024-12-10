@@ -12,12 +12,12 @@ import json
 from torch.utils.data import Dataset
 
 
-from models._utils import BaseModel
+from _models._utils import BaseModel
 from utils.training import train
 from utils.args import add_args
-from models import model_factory
-from networks import network_factory
-from datasets import dataset_factory
+from _models import model_factory
+from _networks import network_factory
+from _datasets import dataset_factory
 from datetime import datetime
 
 

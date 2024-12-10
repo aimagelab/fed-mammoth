@@ -1,9 +1,9 @@
 from argparse import ArgumentParser
 import inspect
 from inspect import Parameter
-from networks import network_factory
-from datasets import dataset_factory
-from models import model_factory
+from _networks import network_factory
+from _datasets import dataset_factory
+from _models import model_factory
 from utils.global_consts import ADDITIONAL_ARGS
 
 EXCLUDE_FROM_ARGS = [

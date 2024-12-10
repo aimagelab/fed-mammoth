@@ -4,12 +4,12 @@ import wandb
 from time import time
 from typing import List
 
-from datasets._utils import BaseDataset
+from _datasets._utils import BaseDataset
 from utils.global_consts import LOG_LOSS_INTERVAL
-from models._utils import BaseModel
+from _models._utils import BaseModel
 from utils.status import progress_bar
 from utils.tools import get_time_str
-from datasets.seq_oos import SequentialOOS
+from _datasets.seq_oos import SequentialOOS
 
 import numpy as np
 import matplotlib.pyplot as plt
