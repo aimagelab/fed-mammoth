@@ -63,7 +63,7 @@ def get_artifacts(args: dict, fabric) -> Tuple[BaseModel, Dataset]:
 
 
 def main(args: dict, output_folders_root: str, nickname: str) -> None:
-    set_random_seed(42)
+    set_random_seed(args["random_seed"])
 
     setproctitle.setproctitle(f"{getpass.getuser()}_{nickname}")
 

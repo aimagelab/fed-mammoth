@@ -23,4 +23,5 @@ ADDITIONAL_ARGS = {
     "test_local_transfer": (str_to_bool, False),
     "validation_interval": (int, 0), # 0 means no validation
     "save_models": (str_to_bool, False),
+    "random_seed": (int, 42),
 }
