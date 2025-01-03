@@ -62,8 +62,8 @@ class BaseModel(nn.Module):
 
     def begin_task(self, n_classes_per_task: int):
         self.cur_task += 1
+        self.cur_offset += self.cpt
         self.cpt = n_classes_per_task
-        self.cur_offset = self.cur_task * self.cpt
 
     def end_task(self, dataloader: DataLoader = None, info: List[dict] = None):
         pass
