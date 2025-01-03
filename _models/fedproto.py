@@ -57,7 +57,7 @@ class FedProto(FedAvg):
             inputs = self.augment(inputs)
             feats, outputs = self.network(inputs, penultimate=True)
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss_ce = self.loss(outputs, labels % self.cpt)
+            loss_ce = self.loss(outputs, labels - self.cur_offset)
             classes = torch.unique(labels)
             loss_mse = 0
             if len(self.global_proto[self.cur_task]) > 0:

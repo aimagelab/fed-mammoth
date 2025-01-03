@@ -62,7 +62,8 @@ class BaseModel(nn.Module):
 
     def begin_task(self, n_classes_per_task: int):
         self.cur_task += 1
-        self.cur_offset += self.cpt
+        if self.cur_task > 0:
+            self.cur_offset += self.cpt
         self.cpt = n_classes_per_task
 
     def end_task(self, dataloader: DataLoader = None, info: List[dict] = None):

@@ -14,7 +14,7 @@ class BaseNetwork(nn.Module):
         assert new_params.size() == self.get_params().size()
         progress = 0
         for pp in list(self.parameters()):
-            cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size())
+            cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size()).detach().clone()
             progress += torch.tensor(pp.size()).prod()
             pp.data = cand_params
 

@@ -52,7 +52,7 @@ class DualPrompt(BaseModel):
         with self.fabric.autocast():
             inputs = self.augment(inputs)
             outputs = self.network(inputs, train=True, task_id = self.cur_task)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
             self.fabric.backward(loss)

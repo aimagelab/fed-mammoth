@@ -157,7 +157,7 @@ class PiLora(Lora):
                 self.network, optimization_dict, inputs, kwargs={"penultimate": True}
             )  # TODO qua rogna con t5
             outputs = outputs[:, self.cur_offset : self.cur_offset + self.cpt]
-            # loss_ce = self.loss(outputs, labels % self.cpt)
+            # loss_ce = self.loss(outputs, labels - self.cur_offset)
             # loss_ce = 0
             loss = 0
             protos = torch.cat([self.class_protos[t][i] for t in range(self.cur_task + 1) for i in range(self.cpt)])

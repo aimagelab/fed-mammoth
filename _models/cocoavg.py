@@ -77,7 +77,7 @@ class CocoAvg(BaseModel):
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         with self.fabric.autocast():
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
             pre_params = self.network.get_params().detach().data.clone()

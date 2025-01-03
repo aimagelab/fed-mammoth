@@ -60,7 +60,7 @@ class TiesMerging(BaseModel):
         aug_inputs = self.augment(inputs)
         with self.fabric.autocast():
             outputs = self.network(aug_inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
             self.fabric.backward(loss)

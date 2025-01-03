@@ -78,7 +78,7 @@ class LwF(BaseModel):
         aug_inputs = self.augment(inputs)
         with self.fabric.autocast():
             outputs = self.network(aug_inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
             if self.cur_task > 0 and self.checkpoint is not None:
                 with torch.no_grad():
                     old_logits = self.checkpoint(aug_inputs)[:, self.cur_offset : self.cur_offset + self.cpt]

@@ -100,7 +100,7 @@ class RegMean_v2(RegMean):
         with self.fabric.autocast():
             inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
             self.fabric.backward(loss)
@@ -336,7 +336,7 @@ class RegMean_v2(RegMean):
                 inputs, labels = features[i : i + batch_size].to(self.device), labels_[i : i + batch_size].to(self.device)
                 optimizer.zero_grad()
                 outputs = self.classifier(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-                loss = self.loss(outputs, labels % self.cpt)
+                loss = self.loss(outputs, labels - self.cur_offset)
                 loss.backward()
                 optimizer.step()
         self.network.eval()

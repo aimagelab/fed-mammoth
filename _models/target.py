@@ -620,7 +620,7 @@ class Target(FedAvg):
         with self.fabric.autocast():
             inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
             if self.syn_data_loader is not None:
                 syn_inputs = next(iter(self.syn_data_loader)).cuda()
                 syn_outputs = self.network(syn_inputs)[:, : self.cur_offset]
@@ -761,7 +761,7 @@ class Target(FedAvg):
         syn_dataset = UnlabeledImageDataset(data_dir, transform=train_transform, nums=self.nums)
         loader = torch.utils.data.DataLoader(
             syn_dataset, batch_size=sample_batch_size, shuffle=True,
-            num_workers=4, pin_memory=True, sampler=None)
+            num_workers=0, pin_memory=True, sampler=None)
         return loader
 
     def end_round_server(self, client_info: List[dict]) -> None:

@@ -263,7 +263,7 @@ class Lora(BaseModel):
             outputs = functional_call(self.network, optimization_dict, inputs)[
                 :, self.cur_offset : self.cur_offset + self.cpt
             ]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
             self.fabric.backward(loss)

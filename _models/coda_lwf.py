@@ -121,7 +121,7 @@ class Coda_LwF(CodaPrompt):
             with torch.no_grad():
                 old_out = self.old_network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
             outputs = self.network(inputs, train=True)[0][:, self.cur_offset : self.cur_offset + self.cpt]
-            loss_ce = self.loss(outputs, labels % self.cpt)
+            loss_ce = self.loss(outputs, labels - self.cur_offset)
             loss_dual_full = F.kl_div(F.log_softmax(old_out, dim=1), F.softmax(outputs, dim=1), reduction="none")
             one_hot_labels = torch.logical_not(F.one_hot(labels % self.cpt, self.cpt)).float()
             beta = (self.betas.unsqueeze(0) @ one_hot_labels.T).flatten()

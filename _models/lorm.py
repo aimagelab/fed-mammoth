@@ -148,7 +148,7 @@ class LoRM(Lora, RegMean):
             outputs = functional_call(self.network, optimization_dict, inputs)[
                 :, self.cur_offset : self.cur_offset + self.cpt
             ]
-            loss = self.loss(outputs, labels % self.cpt)
+            loss = self.loss(outputs, labels - self.cur_offset)
         if update:
             self.fabric.backward(loss)
             # torch.nn.utils.clip_grad_norm_(list(self.cur_B.values()) + list(self.cur_A.values()), 1.0)
