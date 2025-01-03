@@ -1041,10 +1041,10 @@ class VitDual(BaseNetwork):
         assert new_params.size() == self.get_params().size()
         progress = 0
         for pp in list(self.model.head.parameters()) + list(self.model.e_prompt.parameters()):
-            cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size())
+            cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size()).detach().clone()
             progress += torch.tensor(pp.size()).prod()
             pp.data = cand_params
-        self.model.g_prompt = nn.Parameter(new_params[progress:].view(self.model.g_prompt.size()))
+        self.model.g_prompt = nn.Parameter(new_params[progress:].view(self.model.g_prompt.size()).detach().clone())
 
 
 

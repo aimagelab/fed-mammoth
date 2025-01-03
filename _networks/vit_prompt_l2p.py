@@ -634,6 +634,6 @@ class VitL2P(BaseNetwork):
         else:
             progress = 0
             for pp in list(self.last.parameters()) + list(self.prompt.parameters()):
-                cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size())
+                cand_params = new_params[progress : progress + torch.tensor(pp.size()).prod()].view(pp.size()).detach().clone()
                 progress += torch.tensor(pp.size()).prod()
                 pp.data = cand_params

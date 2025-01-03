@@ -85,7 +85,7 @@ def evaluate(fabric, task, model: BaseModel, dataset: BaseDataset, return_respon
             for test_loader in test_loaders:
                 test_loader = fabric.setup_dataloaders(test_loader)
                 for inputs, labels in test_loader:
-                    outputs = model(inputs)[:, start_class:end_class]
+                    outputs = model(dataset.test_transform(inputs))[:, start_class:end_class]
                     pred = torch.max(outputs, dim=1)[1]
                     task_correct += (pred == labels).sum().item()
                     task_total += labels.shape[0]
@@ -126,7 +126,7 @@ def evaluate_client(fabric, task, model: BaseModel, dataset: BaseDataset, idx: i
                 test_loader = dataset.get_cur_dataloaders(t)[1][idx]
             test_loader = fabric.setup_dataloaders(test_loader)
             for inputs, labels in test_loader:
-                outputs = model(inputs)[:, start_class:end_class]
+                outputs = model(dataset.test_transform(inputs))[:, start_class:end_class]
                 pred = torch.max(outputs, dim=1)[1]
                 task_correct += (pred == labels).sum().item()
                 task_total += labels.shape[0]
@@ -165,7 +165,7 @@ def evaluate_client_transfer(fabric, task, model: BaseModel, dataset: BaseDatase
                     continue
                 test_loader = fabric.setup_dataloaders(test_loader)
                 for inputs, labels in test_loader:
-                    outputs = model(inputs)[:, start_class:end_class]
+                    outputs = model(dataset.test_transform(inputs))[:, start_class:end_class]
                     pred = torch.max(outputs, dim=1)[1]
                     task_correct += (pred == labels).sum().item()
                     task_total += labels.shape[0]
