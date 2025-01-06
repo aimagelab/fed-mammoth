@@ -24,4 +24,6 @@ ADDITIONAL_ARGS = {
     "validation_interval": (int, 0), # 0 means no validation
     "save_models": (str_to_bool, False),
     "random_seed": (int, 42),
+    "train_transform": (str, "default_train"),
+    "test_transform": (str, "default_test"),
 }
