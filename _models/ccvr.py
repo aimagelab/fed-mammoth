@@ -38,12 +38,13 @@ class CCVR(BaseModel):
         self.done_linear_probe = False
         self.lr = lr
         self.wd_reg = wd_reg
+        self.cpt = []
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
             inputs = self.augment(inputs)
-            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
             loss = self.loss(outputs, labels - self.cur_offset)
 
         if update:
@@ -59,15 +60,19 @@ class CCVR(BaseModel):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 with torch.no_grad():
                     pre_logits = self.network(inputs, pen=True, train=False)
-                outputs = self.network.model.head(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
-                labels = labels % self.cpt
+                outputs = self.network.model.head(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                labels = labels - self.cur_offset
                 loss = F.cross_entropy(outputs, labels)
                 self.optimizer.zero_grad()
                 self.fabric.backward(loss)
                 self.optimizer.step()
 
     def begin_task(self, n_classes_per_task: int):
-        super().begin_task(n_classes_per_task)
+        #super().begin_task(n_classes_per_task)
+        self.cur_task += 1
+        if self.cur_task > 0:
+            self.cur_offset += n_classes_per_task
+        self.cpt.append(n_classes_per_task)
         if self.do_linear_probe:
             self.done_linear_probe = False
 
@@ -88,7 +93,7 @@ class CCVR(BaseModel):
         clients_gaussians = [client["client_statistics"] for client in client_info]
         self.to(self.device)
         mogs = {}
-        for clas in range(self.cur_offset, self.cur_offset + self.cpt):
+        for clas in range(self.cur_offset, self.cur_offset + self.cpt[-1]):
             counter = 0
             for client_gaussians in clients_gaussians:
                 if client_gaussians.get(clas) is not None:
@@ -120,30 +125,30 @@ class CCVR(BaseModel):
             # TODO: fix the probabilities of the classes
             # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
             # we can set classes_weights asequiprobable
-            num_classes = (self.cur_task + 1) * self.cpt
+            num_classes = self.cur_offset + self.cpt[-1]
             classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
             classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
             _, classes_samples = torch.unique(classes_samples, return_counts=True)
             # sample features from gaussians:
             for task in range(self.cur_task + 1):
-                for clas in range(self.cpt):
-                    if self.mogs_per_task[task].get([task * self.cpt + clas][0]) is None:
+                for clas in range(self.cpt[task]):
+                    if self.mogs_per_task[task].get([sum(self.cpt[:task]) + clas][0]) is None:
                         #print("No gaussian for class ", task * self.cpt + clas)
                         continue
                     weights_list = []
-                    for weight in self.mogs_per_task[task][task * self.cpt + clas][0]:
+                    for weight in self.mogs_per_task[task][sum(self.cpt[:task]) + clas][0]:
                         weights_list.append(weight)
                     gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
                     weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
                     gaussian_samples_fill = torch.multinomial(
-                        weights_list, classes_samples[task * self.cpt + clas], replacement=True
+                            weights_list, classes_samples[sum(self.cpt[:task]) + clas], replacement=True
                     )
                     gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
                     gaussian_samples[gaussian_clients] += gaussian_samples_fill
                     for id, (mean, variance) in enumerate(
                         zip(
-                            self.mogs_per_task[task][task * self.cpt + clas][1],
-                            self.mogs_per_task[task][task * self.cpt + clas][2],
+                            self.mogs_per_task[task][sum(self.cpt[:task]) + clas][1],
+                            self.mogs_per_task[task][sum(self.cpt[:task]) + clas][2],
                         )
                     ):
                         cls_mean = mean  # * (0.9 + decay)
@@ -156,7 +161,7 @@ class CCVR(BaseModel):
                         n_samples = int(torch.round(gaussian_samples[id]))
                         sampled_data_single = m.sample((n_samples,))
                         sampled_data.append(sampled_data_single)
-                        sampled_label.extend([clas + task * self.cpt] * n_samples)
+                        sampled_label.extend([clas + sum(self.cpt[:task])] * n_samples)
             sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
             sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
             inputs = sampled_data
@@ -165,7 +170,7 @@ class CCVR(BaseModel):
             sf_indexes = torch.randperm(inputs.size(0))
             inputs = inputs[sf_indexes]
             targets = targets[sf_indexes]
-            crct_num = (self.cur_task + 1) * self.cpt
+            crct_num = self.cur_offset + self.cpt[-1]
             for _iter in range(crct_num):
                 inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
@@ -177,7 +182,7 @@ class CCVR(BaseModel):
                 per_task_norm = []
                 cur_t_size = 0
                 for _ti in range(self.cur_task + 1):
-                    cur_t_size += self.cpt
+                    cur_t_size += self.cpt[_ti]
                 temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
                 per_task_norm.append(temp_norm)
                 per_task_norm = torch.cat(per_task_norm, dim=-1)
