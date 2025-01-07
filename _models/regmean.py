@@ -171,6 +171,7 @@ class RegMean(BaseModel):
             print()
             for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
                 x, y = x.to(self.device), y.to(self.device)
+                x = self.augment(x)
                 self.forward(x)
                 # if id == 2:
                 #    break
