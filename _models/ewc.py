@@ -172,6 +172,7 @@ class EWC(BaseModel):
         for j, data in enumerate(train_loader):
             inputs, labels = data
             inputs, labels = inputs.to(self.device), labels.to(self.device).long()
+            inputs = self.test_transform(inputs)
             for ex, lab in zip(inputs, labels):
                 output = self.network.module(ex.unsqueeze(0))[:, self.cur_offset : self.cur_offset + self.cpt]
                 loss = - F.nll_loss(self.logsoft(output), lab.unsqueeze(0) % self.cpt,
