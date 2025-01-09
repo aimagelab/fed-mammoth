@@ -11,7 +11,7 @@ from _networks.vit import VisionTransformer
 import numpy as np
 
 
-@register_model("old_cocoavg")
+@register_model("cocoavg")
 class CocoAvg(BaseModel):
 
     def __init__(
@@ -27,10 +27,9 @@ class CocoAvg(BaseModel):
         slca: str_to_bool = False,
         alpha_sample_classes: float = 0,
         beta_entropy: float = 0,
-        weight_pars_dist: str_to_bool = False,
+        gamma_gr_numcl: float = 0,
         weight_on_gradient_dist: str_to_bool = False,
         weight_on_gradient_per_layer: str_to_bool = False,
-        cumulated_gradient_level: str = "all_layers",
     ) -> None:
         self.slca = slca
         self.clients_statistics = None
@@ -48,13 +47,11 @@ class CocoAvg(BaseModel):
             params_backbone = []
             params_head = []
             for n, p in network.named_parameters():
-                p.requires_grad = True #TODO rimetti a posto
+                p.requires_grad = True
                 if "head" not in n:
                     params_backbone.append(p)
-                    #p.requires_grad = False
                 else:
                     params_head.append(p)
-                    #p.requires_grad = True
             params = [{"params": params_head}, {"params": params_backbone}]
             if slca:
                 params = [{"params": params_backbone, "lr": lr / 100}, {"params": params_head}]
@@ -66,12 +63,10 @@ class CocoAvg(BaseModel):
         self.done_linear_probe = False
         self.alpha_sample_classes = alpha_sample_classes
         self.beta_entropy = beta_entropy
-        self.weight_on_pars_distance = weight_pars_dist
+        self.gamma_gr_numcl = gamma_gr_numcl
         self.small_omega = 0
         self.weight_on_gradient_dist = weight_on_gradient_dist
-        self.layers_names = [n for n, p in self.network.named_parameters()]
-        self.params_layers = np.array([n for n, p in self.network.named_parameters() for i in range(len(p.reshape(-1)))])
-        self.cumulated_gradient_level = cumulated_gradient_level
+        self.layers_names = list(self.network.state_dict().keys())
         self.weight_on_gradient_per_layer = weight_on_gradient_per_layer
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
@@ -122,7 +117,6 @@ class CocoAvg(BaseModel):
             updated_head_b += client_b.T * torch.tensor(list(norm_weight.values()))
             classes_covered = classes_covered.union(set([k for k,v in norm_weight.items() if v>0]))
 
-        #TODO need to add server weights and bias for classes not covered by none of the agents
         classes_not_covered = torch.tensor([0 if k in classes_covered else 1 for k in norm_weights_per_class[0].keys()])
         for name, param in self.network.named_parameters():
             if "head.bias" in name:
@@ -152,87 +146,53 @@ class CocoAvg(BaseModel):
                                    for cla in all_classes} for single_client_info in client_info]
         return norm_weights_per_class
 
-    def clients_pars_distance_weights(self, client_info):
-        # Evaluate the distance of every client parameters wrt to old server parameters and create a weight for each
-        # parameter of each client to weight more the bigger changes
-
-        original_parameters = self.network.get_params()
-        params_distances = np.absolute(np.stack([(cl["params"] - original_parameters.cpu()).data.numpy() for cl in client_info])) + 0.1
-        total_abs_change = params_distances.sum(axis=0)
-        params_distances = params_distances / total_abs_change
-        # for params with no change, each client will have the same impact
-        params_distances = np.nan_to_num(params_distances, copy=True, nan=1 / len(client_info))
-        weighted_parameters = np.stack([cl["params"].cpu().data.numpy() for cl in client_info])
-        weighted_parameters = np.multiply(weighted_parameters, params_distances)
-        weighted_parameters = weighted_parameters.sum(axis=0)
-        return torch.from_numpy(weighted_parameters)
-
-    def clients_little_omega_weights(self, client_info):
+    def clients_little_omega_weights(self, client_info, norm_weights):
         # Evaluate the cumulated gradient for every parameter
         # to weight more the bigger changes
 
-        little_omegas = np.stack([cl["small_omega"].cpu() for cl in client_info]) + 0.1
-        little_omegas_sum = little_omegas.sum(axis=0)
+        little_omegas_sum = 0
+        for client in client_info:
+            little_omegas_sum += client["small_omega"]
 
-        little_omegas_normed = little_omegas/little_omegas_sum
-        little_omegas_normed = np.nan_to_num(little_omegas_normed, copy=True, nan=1 / len(client_info))
-        weighted_parameters = np.stack([cl["params"].cpu().data.numpy() for cl in client_info])
-        weighted_parameters = np.multiply(weighted_parameters, little_omegas_normed)
-        weighted_parameters = weighted_parameters.sum(axis=0)
+        weighted_parameters = 0
+        for i, client in enumerate(client_info):
+            cl_weighted_params = client["params"]
+            little_omegas_normed = (client["small_omega"] / little_omegas_sum).cpu()
+            little_omegas_normed = torch.nan_to_num(little_omegas_normed, nan=1 / len(client_info))
+            tensor_norm_weights = torch.tensor([norm_weights[i]]).repeat(
+                little_omegas_normed.size(0)).float()
+            little_omegas_normed = (1 - self.gamma_gr_numcl) * little_omegas_normed + (
+                self.gamma_gr_numcl) * tensor_norm_weights
+            cl_weighted_params = cl_weighted_params * little_omegas_normed
+            weighted_parameters += cl_weighted_params
 
-        return torch.from_numpy(weighted_parameters)
+        return weighted_parameters.to(self.device)
 
 
-    def clients_layer_cumulated_gradient_weights(self, client_info):
-        # Evaluate the cumulated gradient for every parameter
+    def clients_layer_cumulated_gradient_weights(self, client_info, norm_weights):
+        # Evaluate the cumulated gradient for every layer
         # to weight more the bigger changes
+        weighted_parameters = torch.empty((len(client_info), 0))
 
-        # 3 opzioni:
-        # 1- su tutti i layers peso rispetto alla somma degli omegas su quel layer, caso "all_layers"
-        # 2- faccio lo stesso solo sulle matrici di attention facendo avg sul resto, caso "attention_only"
-        # 3- sulle matrici di attention invece di pesare tengo direttamente quelle con variazione più alta, facendo avg sul resto "attention_not_w"
+        position_count = 0
+        for l_n in self.layers_names:
+            layer_length = torch.numel(self.network.state_dict()[l_n])
+            cumulated_gradients = torch.empty([])
+            for client in client_info:
+                cumulated_gradients = torch.cat([cumulated_gradients, client["small_omega"][position_count:position_count + layer_length].sum()])
 
-        little_omegas = torch.stack([cl["small_omega"] for cl in client_info])
-        original_parameters = torch.stack([cl["params"] for cl in client_info])
-        weighted_parameters = torch.empty((original_parameters.shape[0], 0))
-        if self.cumulated_gradient_level == "all_layers":
-            for l_n in self.layers_names:
-                layer_index = self.params_layers==l_n
-                cumulated_gradients = little_omegas[:, layer_index].sum(axis=1)
-                total_gradient = cumulated_gradients.sum()
-                weights = cumulated_gradients/total_gradient
-                weighted_parameters_layer = weights[:, np.newaxis] * original_parameters[:, layer_index]
-                weighted_parameters_layer.sum(axis=0)
-                weighted_parameters = torch.cat((weighted_parameters, weighted_parameters_layer), axis=1)
+            total_gradient = cumulated_gradients.sum()
+            if total_gradient == 0:
+                weights = torch.tensor([1 / len(client_info) for cl in client_info])
+            else:
+                weights = (1 - self.gamma_gr_numcl) * (cumulated_gradients / total_gradient) + (self.gamma_gr_numcl * norm_weights)
 
-        elif self.cumulated_gradient_level == "attention_only":
-            for l_n in self.layers_names:
-                layer_index = self.params_layers==l_n
-                if 'attn' in l_n:
-                    cumulated_gradients = little_omegas[:, layer_index].sum(axis=1)
-                    total_gradient = cumulated_gradients.sum()
-                    weights = cumulated_gradients/total_gradient
-                else:
-                    weights = [1/ len(client_info) for cl in client_info]
-                weighted_parameters_layer = weights[:, np.newaxis] * original_parameters[:, layer_index]
-                weighted_parameters_layer.sum(axis=0)
-                weighted_parameters = torch.cat((weighted_parameters, weighted_parameters_layer), axis=1)
+            original_parameters = torch.stack([cl["params"][:, position_count:position_count + layer_length] for cl in client_info])
+            weighted_parameters = torch.cat((weighted_parameters,
+                                             (original_parameters[:,
+                                              position_count:position_count + layer_length].T * weights.cpu()).T.sum(axis=0)))
 
-        elif self.cumulated_gradient_level == "attention_not_w": # to be completed
-            for l_n in self.layers_names:
-                layer_index = self.params_layers==l_n
-                if 'attn' in l_n:
-                    cumulated_gradients = little_omegas[:, layer_index].sum(axis=1)
-                    total_gradient = cumulated_gradients.sum()
-                    weights = cumulated_gradients/total_gradient
-                else:
-                    weights = [1/ len(client_info) for cl in client_info]
-                weighted_parameters_layer = weights[:, np.newaxis] * original_parameters[:, layer_index]
-                weighted_parameters_layer.sum(axis=0)
-                weighted_parameters = np.concatenate((weighted_parameters, weighted_parameters_layer), axis=1)
-
-        else:
-            raise ValueError("Cumulated gradient level is not supported.")
+            position_count = position_count + layer_length
 
         return weighted_parameters
 
@@ -243,10 +203,10 @@ class CocoAvg(BaseModel):
             for cla in all_classes}
 
         norm_vars_per_class = [{cla: single_client_info['client_statistics'][cla][2].mean().cpu() /
-                                        total_vars_per_class[cla]
-                                if cla in single_client_info['client_statistics'] and total_vars_per_class[cla] > 0
-                                else 0
-                                for cla in all_classes} for single_client_info in client_info]
+                                     total_vars_per_class[cla]
+                                    if cla in single_client_info['client_statistics'] and total_vars_per_class[cla] > 0
+                                    else torch.tensor(0)
+                                    for cla in all_classes} for single_client_info in client_info]
         return norm_vars_per_class
 
     def end_round_server(self, client_info: List[dict]):
@@ -298,16 +258,13 @@ class CocoAvg(BaseModel):
         # if weight_on_gradient_per_layer=True it uses the cumulated gradient for each layer to weight more the layers that cumulated more gradient
         # else it uses the weights from previous calculation
 
-        print("weight_on_pars_distance",self.weight_on_pars_distance)
         print("weight_on_gradient_dist",self.weight_on_gradient_dist)
         print("weight_on_gradient_per_layer",self.weight_on_gradient_per_layer)
         if len(client_info) > 0:
-            if self.weight_on_pars_distance:
-                merged_weights = self.clients_pars_distance_weights(client_info)
-            elif self.weight_on_gradient_dist:
-                merged_weights = self.clients_little_omega_weights(client_info)
+            if self.weight_on_gradient_dist:
+                merged_weights = self.clients_little_omega_weights(client_info, norm_weights)
             elif self.weight_on_gradient_per_layer:
-                merged_weights = self.clients_layer_cumulated_gradient_weights(client_info)
+                merged_weights = self.clients_layer_cumulated_gradient_weights(client_info, norm_weights)
             else:
                 merged_weights = 0
                 for client, norm_weight in zip(client_info, norm_weights):
