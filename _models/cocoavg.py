@@ -177,9 +177,9 @@ class CocoAvg(BaseModel):
         position_count = 0
         for l_n in self.layers_names:
             layer_length = torch.numel(self.network.state_dict()[l_n])
-            cumulated_gradients = torch.empty([])
-            for client in client_info:
-                cumulated_gradients = torch.cat([cumulated_gradients, client["small_omega"][position_count:position_count + layer_length].sum()])
+            cumulated_gradients = torch.zeros(len(client_info))
+            for i, client in enumerate(client_info):
+                cumulated_gradients[i] = client["small_omega"][position_count:position_count + layer_length].sum()
 
             total_gradient = cumulated_gradients.sum()
             if total_gradient == 0:
@@ -271,15 +271,16 @@ class CocoAvg(BaseModel):
                     merged_weights += client["params"] * norm_weight
             self.network.set_params(merged_weights)
 
-            # After updating the parameters, I reapply the update for the head, since strategy of class_weighted parameters for the head is best
-            updated_head_w, updated_head_b = self.weighted_head_per_class(norm_weights_per_class,
-                                                                     [cl["params_head_w"] for cl in client_info],
-                                                                     [cl["params_head_b"] for cl in client_info])
-            for name, param in self.network.named_parameters():
-                if "head.bias" in name:
-                    param.data = updated_head_b
-                if "head.weight" in name:
-                    param.data = updated_head_w
+            if self.avg_type == "class_weighted":
+                # After updating the parameters, I reapply the update for the head, since strategy of class_weighted parameters for the head is best
+                updated_head_w, updated_head_b = self.weighted_head_per_class(norm_weights_per_class,
+                                                                         [cl["params_head_w"] for cl in client_info],
+                                                                         [cl["params_head_b"] for cl in client_info])
+                for name, param in self.network.named_parameters():
+                    if "head.bias" in name:
+                        param.data = updated_head_b
+                    if "head.weight" in name:
+                        param.data = updated_head_w
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
