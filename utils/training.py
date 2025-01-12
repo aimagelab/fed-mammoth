@@ -14,8 +14,6 @@ from _datasets.seq_oos import SequentialOOS
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-
 def compute_forgetting(accuracies: List[List[float]]) -> List[float]:
     forgetting = []
     tasks = len(accuracies)
@@ -238,6 +236,7 @@ def train(
         active_clients_sampled = (active_clients_sampled[torch.argsort(active_clients_sampled)]).tolist()
         for index, client_model in zip(active_clients_sampled, client_models):
             client_model.augment = dataset.train_transform
+            client_model.test_transform = dataset.test_transform
             if isinstance(dataset.N_CLASSES_PER_TASK, list):
                 client_model.begin_task(dataset.N_CLASSES_PER_TASK[task])
             else:
