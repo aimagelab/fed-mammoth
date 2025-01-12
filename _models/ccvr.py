@@ -71,7 +71,7 @@ class CCVR(BaseModel):
         #super().begin_task(n_classes_per_task)
         self.cur_task += 1
         if self.cur_task > 0:
-            self.cur_offset += n_classes_per_task
+            self.cur_offset += self.cpt[-1]
         self.cpt.append(n_classes_per_task)
         if self.do_linear_probe:
             self.done_linear_probe = False
