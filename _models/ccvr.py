@@ -180,7 +180,7 @@ class CCVR(BaseModel):
                 temp_norm = torch.norm(logits, p=2, dim=-1, keepdim=True)
                 norms = temp_norm.mean(dim=-1, keepdim=True)
 
-                decoupled_logits = torch.div(logits[:, self.cur_offset:self.cur_offset+self.cpt[-1]] + 1e-12, norms + 1e-12) / self.logit_norm
+                decoupled_logits = torch.div(logits + 1e-12, norms + 1e-12) / self.logit_norm
                 loss = F.cross_entropy(decoupled_logits, tgt - self.cur_offset)
                 optimizer.zero_grad()
                 loss.backward()
