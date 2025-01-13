@@ -31,7 +31,7 @@ class CCVR(BaseModel):
         self.avg_type = avg_type
         self.how_many = how_many
         self.clients_statistics = None
-        self.mogs_per_task = {}
+        self.mogs = {}
         self.logit_norm = 0.1
         self.full_cov = full_cov
         self.do_linear_probe = linear_probe
@@ -112,7 +112,7 @@ class CCVR(BaseModel):
                     counter += client_gaussians[clas][0]
             if mogs.get(clas) is not None:
                 mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
-        self.mogs_per_task[self.cur_task] = mogs
+        self.mogs = mogs
         if "t5" not in str(type(self.network.model)).lower():
             optimizer = torch.optim.SGD(self.network.model.head.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
         else:
@@ -125,43 +125,42 @@ class CCVR(BaseModel):
             # TODO: fix the probabilities of the classes
             # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
             # we can set classes_weights asequiprobable
-            num_classes = self.cur_offset + self.cpt[-1]
-            classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
-            classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
+            num_cur_classes = self.cpt[-1]
+            classes_weights = torch.ones(num_cur_classes, dtype=torch.float32).to(self.device)
+            classes_samples = torch.multinomial(classes_weights, self.how_many * num_cur_classes, replacement=True)
             _, classes_samples = torch.unique(classes_samples, return_counts=True)
             # sample features from gaussians:
-            for task in range(self.cur_task + 1):
-                for clas in range(self.cpt[task]):
-                    if self.mogs_per_task[task].get([sum(self.cpt[:task]) + clas][0]) is None:
-                        #print("No gaussian for class ", task * self.cpt + clas)
-                        continue
-                    weights_list = []
-                    for weight in self.mogs_per_task[task][sum(self.cpt[:task]) + clas][0]:
-                        weights_list.append(weight)
-                    gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
-                    weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
-                    gaussian_samples_fill = torch.multinomial(
-                            weights_list, classes_samples[sum(self.cpt[:task]) + clas], replacement=True
+            for clas in range(self.cur_offset, self.cur_offset + self.cpt[-1]):
+                if self.mogs.get([clas][0]) is None:
+                    #print("No gaussian for class ", task * self.cpt + clas)
+                    continue
+                weights_list = []
+                for weight in self.mogs[clas][0]:
+                    weights_list.append(weight)
+                gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
+                weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
+                gaussian_samples_fill = torch.multinomial(
+                        weights_list, classes_samples[clas - self.cur_offset], replacement=True
+                )
+                gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
+                gaussian_samples[gaussian_clients] += gaussian_samples_fill
+                for id, (mean, variance) in enumerate(
+                    zip(
+                        self.mogs[clas][1],
+                        self.mogs[clas][2],
                     )
-                    gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
-                    gaussian_samples[gaussian_clients] += gaussian_samples_fill
-                    for id, (mean, variance) in enumerate(
-                        zip(
-                            self.mogs_per_task[task][sum(self.cpt[:task]) + clas][1],
-                            self.mogs_per_task[task][sum(self.cpt[:task]) + clas][2],
-                        )
-                    ):
-                        cls_mean = mean  # * (0.9 + decay)
-                        cls_var = variance
-                        if self.full_cov:
-                            cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
-                        else:
-                            cov = (torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var) + (1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device))
-                        m = MultivariateNormal(cls_mean, cov)
-                        n_samples = int(torch.round(gaussian_samples[id]))
-                        sampled_data_single = m.sample((n_samples,))
-                        sampled_data.append(sampled_data_single)
-                        sampled_label.extend([clas + sum(self.cpt[:task])] * n_samples)
+                ):
+                    cls_mean = mean  # * (0.9 + decay)
+                    cls_var = variance
+                    if self.full_cov:
+                        cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
+                    else:
+                        cov = (torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var) + (1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device))
+                    m = MultivariateNormal(cls_mean, cov)
+                    n_samples = int(torch.round(gaussian_samples[id]))
+                    sampled_data_single = m.sample((n_samples,))
+                    sampled_data.append(sampled_data_single)
+                    sampled_label.extend([clas] * n_samples)
             sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
             sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
             inputs = sampled_data
@@ -170,25 +169,19 @@ class CCVR(BaseModel):
             sf_indexes = torch.randperm(inputs.size(0))
             inputs = inputs[sf_indexes]
             targets = targets[sf_indexes]
-            crct_num = self.cur_offset + self.cpt[-1]
-            for _iter in range(crct_num):
+            for _iter in range(self.cpt[-1]):
                 inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                 if "t5" not in str(type(self.network.model)).lower():
                     outputs = self.network.model.head(inp)
                 else:
                     outputs = self.network.head(inp)
-                logits = outputs
-                per_task_norm = []
-                cur_t_size = sum(self.cpt)
-                temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
-                per_task_norm.append(temp_norm)
-                per_task_norm = torch.cat(per_task_norm, dim=-1)
-                logits_norm = torch.cat((logits_norm, per_task_norm.mean(dim=0, keepdim=True)), dim=0)
-                norms = per_task_norm.mean(dim=-1, keepdim=True)
+                logits = outputs[:, self.cur_offset:self.cur_offset+self.cpt[-1]]
+                temp_norm = torch.norm(logits, p=2, dim=-1, keepdim=True)
+                norms = temp_norm.mean(dim=-1, keepdim=True)
 
-                decoupled_logits = torch.div(logits[:, :crct_num] + 1e-12, norms + 1e-12) / self.logit_norm
-                loss = F.cross_entropy(decoupled_logits, tgt)
+                decoupled_logits = torch.div(logits[:, self.cur_offset:self.cur_offset+self.cpt[-1]] + 1e-12, norms + 1e-12) / self.logit_norm
+                loss = F.cross_entropy(decoupled_logits, tgt - self.cur_offset)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -256,7 +249,7 @@ class CCVR(BaseModel):
             "comm_round": comm_round,
             "network": self.network,
             "optimizer": self.optimizer,
-            "mogs": self.mogs_per_task,
+            "mogs": self.mogs,
         }
         name = "hgp_" + "full_cov" if self.full_cov else "diag_cov"
         name += "_linear_probe" if self.do_linear_probe else ""
