@@ -180,9 +180,7 @@ class CCVR(BaseModel):
                     outputs = self.network.head(inp)
                 logits = outputs
                 per_task_norm = []
-                cur_t_size = 0
-                for _ti in range(self.cur_task + 1):
-                    cur_t_size += self.cpt[_ti]
+                cur_t_size = sum(self.cpt)
                 temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
                 per_task_norm.append(temp_norm)
                 per_task_norm = torch.cat(per_task_norm, dim=-1)
