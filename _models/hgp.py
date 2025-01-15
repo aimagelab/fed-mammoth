@@ -88,7 +88,7 @@ class HGP(BaseModel):
         linear_probe: str_to_bool = False,
         num_epochs: int = 5,
         rebalance_epochs: int = 5,
-        rebalance_lr: float = 1e-3,
+        rebalance_lr: float = -1,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
         super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
@@ -109,7 +109,10 @@ class HGP(BaseModel):
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
         self.lr = lr
         self.rebalance_epochs = rebalance_epochs
-        self.rebalance_lr = rebalance_lr
+        if rebalance_lr == -1:
+            self.rebalance_lr = lr
+        else:
+            self.rebalance_lr = rebalance_lr
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
