@@ -87,6 +87,8 @@ class HGP(BaseModel):
         full_cov: str_to_bool = False,
         linear_probe: str_to_bool = False,
         num_epochs: int = 5,
+        rebalance_epochs: int = 5,
+        rebalance_lr: float = 1e-3,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
         super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
@@ -106,6 +108,8 @@ class HGP(BaseModel):
         self.num_epochs = num_epochs
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
         self.lr = lr
+        self.rebalance_epochs = rebalance_epochs
+        self.rebalance_lr = rebalance_lr
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -181,10 +185,10 @@ class HGP(BaseModel):
             if mogs.get(clas) is not None:
                 mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
         self.mogs_per_task[self.cur_task] = mogs
-        optimizer = torch.optim.SGD(self.network.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
+        optimizer = torch.optim.SGD(self.network.last.parameters(), lr=self.rebalance_lr, momentum=0.9, weight_decay=0)
+        #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
         logits_norm = torch.tensor([], dtype=torch.float32).to(self.device)
-        for epoch in range(5):
+        for epoch in range(self.rebalance_epochs):
             sampled_data = []
             sampled_label = []
             # TODO: fix the probabilities of the classes
@@ -257,7 +261,7 @@ class HGP(BaseModel):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            scheduler.step()
+            #scheduler.step()
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
