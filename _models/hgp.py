@@ -105,6 +105,7 @@ class HGP(BaseModel):
         self.done_linear_probe = False
         self.num_epochs = num_epochs
         self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        self.lr = lr
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
@@ -220,7 +221,7 @@ class HGP(BaseModel):
                         if self.full_cov:
                             cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
                         else:
-                            cov = torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var * 3
+                            cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8) * 3
                         m = MultivariateNormal(cls_mean, cov)
                         n_samples = int(torch.round(gaussian_samples[id]))
                         sampled_data_single = m.sample((n_samples,))
@@ -267,12 +268,13 @@ class HGP(BaseModel):
             self.done_linear_probe = True
             # restore correct optimizer
         params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
-        optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
+        #params = [{"params": self.network.last.parameters()}]
+        optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=0)
         self.optimizer = self.fabric.setup_optimizers(optimizer)
-        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        #self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
 
     def end_epoch(self):
-        self.scheduler.step()
+        #self.scheduler.step()
         return None
 
     def get_client_info(self, dataloader: DataLoader):
