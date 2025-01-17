@@ -9,7 +9,6 @@ from utils.global_consts import LOG_LOSS_INTERVAL
 from _models._utils import BaseModel
 from utils.status import progress_bar
 from utils.tools import get_time_str
-from _datasets.seq_oos import SequentialOOS
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -298,17 +297,18 @@ def train(
                     accuracy = evaluate_client(fabric, task, model, dataset, client_idx)
                     print(f"Client {client_idx} Local acc: {accuracy[0]}")
                     if args["wandb"]:
-                        wandb.log({f"Client {client_idx} Local acc": accuracy[0]})
+                        wandb.log({f"Client {client_idx} Local acc": accuracy[0], "comm_round": comm_round + 1 + task * args["num_comm_rounds"]})
                 if args["test_local_transfer"]:
                     accuracy = evaluate_client_transfer(fabric, task, model, dataset, client_idx)
                     print(f"Client {client_idx} Local Transfer acc: {accuracy[0]}")
                     if args["wandb"]:
-                        wandb.log({f"Client {client_idx} Local Transfer acc": accuracy[0]})
+                        wandb.log({f"Client {client_idx} Local Transfer acc": accuracy[0], "comm_round": comm_round + 1 + task * args["num_comm_rounds"]})
+
                 if args["validation_interval"] > 0 and (comm_round + 1) % args["validation_interval"] == 0:
                     model.end_round_validation_client(train_loader, test_loader)
                     accuracy = evaluate(fabric, task, model, dataset)
                     if args["wandb"]:
-                        wandb.log({"Global client acc": accuracy})
+                        wandb.log({"Global client acc": accuracy, "comm_round": comm_round + 1 + task * args["num_comm_rounds"]})
                 model.to("cpu")
                 clients_info.append(model.get_client_info(train_loader))
                 torch.cuda.empty_cache()
@@ -322,6 +322,7 @@ def train(
             if args["wandb"]:
                 results = {
                     "Mean_accuracy": accuracy[0],
+                    "task": task + 1 
                 }
                 for i in range(len(accuracy[1])):
                     results[f"Task_{i + 1}_accuracy"] = accuracy[1][i]
@@ -361,6 +362,7 @@ def train(
             results = {
                 "Mean_accuracy": accuracy[0],
                 "End of task Accuracy": accuracy[0],
+                "task": task + 1
                 # TODO: add other things here
             }
 
@@ -378,7 +380,7 @@ def train(
         acc_image = wandb.Image(paths[0], caption="Accuracies Matrix")
         forg_image = wandb.Image(paths[1], caption="Forgetting Vector")
 
-        wandb.log({"Accuracies Matrix": acc_image, "Forgetting Vector": forg_image})
+        wandb.log({"Accuracies Matrix": acc_image, "Forgetting Vector": forg_image, "task": task + 1})
 
     if args["wandb"]:
         wandb.finish()
