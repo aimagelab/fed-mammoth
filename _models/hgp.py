@@ -106,7 +106,7 @@ class HGP(BaseModel):
         self.do_linear_probe = linear_probe
         self.done_linear_probe = False
         self.num_epochs = num_epochs
-        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        #self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
         self.lr = lr
         self.rebalance_epochs = rebalance_epochs
         if rebalance_lr == -1:

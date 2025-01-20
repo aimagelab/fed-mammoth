@@ -36,11 +36,13 @@ class RegMean(BaseModel):
         train_bias: str = "all",
         clip_grad: str_to_bool = False,
         linear_probe_epochs: int = 0,
+        regmean_rounds: int = 1,
     ) -> None:
         self.reg_dtype_64 = reg_dtype_64
         self.optimizer_str = optimizer
         self.lr = lr
         self.wd_reg = wd_reg
+        self.regmean_rounds = regmean_rounds
         self.clip_grad = clip_grad
         if alpha_regmean_backbone < 0:
             alpha_regmean_backbone = alpha_regmean_head
@@ -168,13 +170,13 @@ class RegMean(BaseModel):
                 # module.forward_handle = module.register_forward_hook(self.hook_forward)
                 hooks[name] = module.register_forward_hook(self.hook_handler(name))
         with torch.no_grad():
-            print()
-            for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
-                x, y = x.to(self.device), y.to(self.device)
-                x = self.augment(x)
-                self.forward(x)
-                # if id == 2:
-                #    break
+            for _ in range(self.regmean_rounds):
+                for id, (x, y) in enumerate(tqdm(dataloader, desc="Computing Gram matrices")):
+                    x, y = x.to(self.device), y.to(self.device)
+                    x = self.augment(x)
+                    self.forward(x)
+                    # if id == 2:
+                    #    break
         for name, module in self.network.named_modules():
             if name in self.gram_modules:
                 if "head" in name:
