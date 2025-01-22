@@ -10,6 +10,7 @@ from _networks.vit_prompt_hgp import VitHGP
 import os
 from utils.tools import str_to_bool
 import math
+from tqdm import tqdm
 
 
 class _LRScheduler(object):
@@ -208,88 +209,92 @@ class HGP(BaseModel):
             )
         cur_seen_classes = torch.stack([client_info[i]["seen_classes"] for i in range(len(client_info))]).sum(0)
         self.history_classes[self.cur_offset : self.cur_offset + self.cpt[-1]] = cur_seen_classes
-        for epoch in range(self.rebalance_epochs):
-            sampled_data = []
-            sampled_label = []
-            # TODO: fix the probabilities of the classes
-            # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
-            # we can set classes_weights asequiprobable
-            num_classes = sum(self.cpt)
-            #classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
-            classes_weights = self.history_classes
-            classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
-            _, classes_samples = torch.unique(classes_samples, return_counts=True)
-            # sample features from gaussians:
-            initial_task = 0 if not self.reb_only_cur else self.cur_task
-            final_task = self.cur_task + 1 if not self.reb_only_old else self.cur_task
-            if initial_task != final_task:
-                for task in range(initial_task, final_task):
-                    for clas in range(self.cpt[task]):
-                        cur_oft = sum(self.cpt[:task])
-                        if self.mogs_per_task[task].get([cur_oft + clas][0]) is None:
-                            #print("No gaussian for class ", cur_oft + clas)
-                            continue
-                        weights_list = []
-                        for weight in self.mogs_per_task[task][cur_oft + clas][0]:
-                            weights_list.append(weight)
-                        gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
-                        weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
-                        gaussian_samples_fill = torch.multinomial(
-                            weights_list, classes_samples[cur_oft + clas], replacement=True
-                        )
-                        gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
-                        gaussian_samples[gaussian_clients] += gaussian_samples_fill
-                        for id, (mean, variance) in enumerate(
-                            zip(
-                                self.mogs_per_task[task][cur_oft + clas][1],
-                                self.mogs_per_task[task][cur_oft + clas][2],
+        with tqdm(total=self.rebalance_epochs) as pbar:
+            for epoch in range(self.rebalance_epochs):
+                pbar.set_description(f"Rebalancing epoch {epoch}")
+                sampled_data = []
+                sampled_label = []
+                # TODO: fix the probabilities of the classes
+                # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
+                # we can set classes_weights asequiprobable
+                num_classes = sum(self.cpt)
+                #classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
+                classes_weights = self.history_classes
+                classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
+                _, classes_samples = torch.unique(classes_samples, return_counts=True)
+                # sample features from gaussians:
+                initial_task = 0 if not self.reb_only_cur else self.cur_task
+                final_task = self.cur_task + 1 if not self.reb_only_old else self.cur_task
+                if initial_task != final_task:
+                    for task in range(initial_task, final_task):
+                        for clas in range(self.cpt[task]):
+                            cur_oft = sum(self.cpt[:task])
+                            if self.mogs_per_task[task].get([cur_oft + clas][0]) is None:
+                                #print("No gaussian for class ", cur_oft + clas)
+                                continue
+                            weights_list = []
+                            for weight in self.mogs_per_task[task][cur_oft + clas][0]:
+                                weights_list.append(weight)
+                            gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
+                            weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
+                            gaussian_samples_fill = torch.multinomial(
+                                weights_list, classes_samples[cur_oft + clas], replacement=True
                             )
-                        ):
-                            cls_mean = mean  # * (0.9 + decay)
-                            cls_var = variance
-                            if self.full_cov:
-                                cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
-                            else:
-                                cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8) * 3
-                            m = MultivariateNormal(cls_mean, cov)
-                            n_samples = int(torch.round(gaussian_samples[id]))
-                            sampled_data_single = m.sample((n_samples,))
-                            sampled_data.append(sampled_data_single)
-                            sampled_label.extend([cur_oft + clas] * n_samples)
-                sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
-                sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
-                inputs = sampled_data
-                targets = sampled_label
+                            gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
+                            gaussian_samples[gaussian_clients] += gaussian_samples_fill
+                            for id, (mean, variance) in enumerate(
+                                zip(
+                                    self.mogs_per_task[task][cur_oft + clas][1],
+                                    self.mogs_per_task[task][cur_oft + clas][2],
+                                )
+                            ):
+                                cls_mean = mean  # * (0.9 + decay)
+                                cls_var = variance
+                                if self.full_cov:
+                                    cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
+                                else:
+                                    cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8)# * 3
+                                m = MultivariateNormal(cls_mean, cov)
+                                n_samples = int(torch.round(gaussian_samples[id]))
+                                sampled_data_single = m.sample((n_samples,))
+                                sampled_data.append(sampled_data_single)
+                                sampled_label.extend([cur_oft + clas] * n_samples)
+                    sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
+                    sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
+                    inputs = sampled_data
+                    targets = sampled_label
 
-                sf_indexes = torch.randperm(inputs.size(0))
-                inputs = inputs[sf_indexes]
-                targets = targets[sf_indexes]
-                crct_num = sum(self.cpt)
-                for _iter in range(crct_num):
-                    inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                    tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                    if self.reb_only_cur:
-                        outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
-                    elif self.reb_only_old:
-                        outputs = self.network.last(inp)[:, :self.cur_offset]
-                    else:
-                        outputs = self.network.last(inp)
-                    logits = outputs
-                    per_task_norm = []
-                    cur_t_size = sum(self.cpt)
-                    temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
-                    per_task_norm.append(temp_norm)
-                    per_task_norm = torch.cat(per_task_norm, dim=-1)
-                    logits_norm = torch.cat((logits_norm, per_task_norm.mean(dim=0, keepdim=True)), dim=0)
-                    norms = per_task_norm.mean(dim=-1, keepdim=True)
+                    sf_indexes = torch.randperm(inputs.size(0))
+                    inputs = inputs[sf_indexes]
+                    targets = targets[sf_indexes]
+                    crct_num = sum(self.cpt)
+                    for _iter in range(crct_num):
+                        inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
+                        tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
+                        if self.reb_only_cur:
+                            outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                        elif self.reb_only_old:
+                            outputs = self.network.last(inp)[:, :self.cur_offset]
+                        else:
+                            outputs = self.network.last(inp)
+                        logits = outputs
+                        per_task_norm = []
+                        cur_t_size = sum(self.cpt)
+                        temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
+                        per_task_norm.append(temp_norm)
+                        per_task_norm = torch.cat(per_task_norm, dim=-1)
+                        logits_norm = torch.cat((logits_norm, per_task_norm.mean(dim=0, keepdim=True)), dim=0)
+                        norms = per_task_norm.mean(dim=-1, keepdim=True)
 
-                    norms_all = torch.norm(logits[:, :crct_num], p=2, dim=-1, keepdim=True)
-                    decoupled_logits = torch.div(logits[:, :crct_num] + 1e-12, norms + 1e-12) / self.logit_norm
-                    loss = F.cross_entropy(decoupled_logits, tgt)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                #scheduler.step()
+                        norms_all = torch.norm(logits[:, :crct_num], p=2, dim=-1, keepdim=True)
+                        decoupled_logits = torch.div(logits[:, :crct_num] + 1e-12, norms + 1e-12) / self.logit_norm
+                        loss = F.cross_entropy(decoupled_logits, tgt)
+                        pbar.set_postfix({"loss": loss.item()})
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+                    #scheduler.step()
+                pbar.update(1)
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
