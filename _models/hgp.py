@@ -268,7 +268,12 @@ class HGP(BaseModel):
                 for _iter in range(crct_num):
                     inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                     tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                    outputs = self.network.last(inp)
+                    if self.reb_only_cur:
+                        outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                    elif self.reb_only_old:
+                        outputs = self.network.last(inp)[:, :self.cur_offset]
+                    else:
+                        outputs = self.network.last(inp)
                     logits = outputs
                     per_task_norm = []
                     cur_t_size = sum(self.cpt)
