@@ -253,7 +253,7 @@ class HGP(BaseModel):
                                 if self.full_cov:
                                     cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
                                 else:
-                                    cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8)# * 3
+                                    cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8) * 3
                                 m = MultivariateNormal(cls_mean, cov)
                                 n_samples = int(torch.round(gaussian_samples[id]))
                                 sampled_data_single = m.sample((n_samples,))
