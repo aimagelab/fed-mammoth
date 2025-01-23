@@ -942,7 +942,7 @@ class VitDual(BaseNetwork):
                  num_tasks: int = 10, 
                  num_classes: int = 100, 
                  pool_size: int = 100, 
-                 prompt_length: int = 8):
+                 prompt_length: int = 20):
         super().__init__()
         self.n_classes = num_classes
         drop = 0.0
@@ -956,7 +956,7 @@ class VitDual(BaseNetwork):
         )
         self.original_model.eval()
         top_k = 1
-        length = 5
+        length = prompt_length
         prompt_pool = True
         prompt_key = True
         initializer = "uniform"
