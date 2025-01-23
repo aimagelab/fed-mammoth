@@ -273,6 +273,7 @@ class HGP(BaseModel):
                         tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
                         if self.reb_only_cur:
                             outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                            tgt = tgt - self.cur_offset
                         elif self.reb_only_old:
                             outputs = self.network.last(inp)[:, :self.cur_offset]
                         else:
