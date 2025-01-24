@@ -10,6 +10,7 @@ from _networks.vit_prompt_hgp import VitHGP
 import os
 from utils.tools import str_to_bool
 import math
+from tqdm import tqdm
 
 
 class _LRScheduler(object):
@@ -87,6 +88,10 @@ class HGP(BaseModel):
         full_cov: str_to_bool = False,
         linear_probe: str_to_bool = False,
         num_epochs: int = 5,
+        rebalance_epochs: int = 5,
+        rebalance_lr: float = -1,
+        reb_only_old: str_to_bool = False,
+        reb_only_cur: str_to_bool = False,
     ) -> None:
         params = [{"params": network.last.parameters()}, {"params": network.prompt.parameters()}]
         super().__init__(fabric, network, device, optimizer, lr, wd_reg, params=params)
@@ -104,18 +109,30 @@ class HGP(BaseModel):
         self.do_linear_probe = linear_probe
         self.done_linear_probe = False
         self.num_epochs = num_epochs
-        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        #self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        self.lr = lr
+        self.rebalance_epochs = rebalance_epochs
+        if rebalance_lr == -1:
+            self.rebalance_lr = lr
+        else:
+            self.rebalance_lr = rebalance_lr
+        self.cpt = []
+        self.seen_classes = None
+        self.reb_only_old = reb_only_old
+        self.reb_only_cur = reb_only_cur
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()
         with self.fabric.autocast():
             inputs = self.augment(inputs)
-            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
+            outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
             loss = self.loss(outputs, labels - self.cur_offset)
+            seen, counts = labels.unique(return_counts=True)
+            self.seen_classes[seen - self.cur_offset] += counts
 
         if update:
             self.fabric.backward(loss)
-            torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
+            #torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
             self.optimizer.step()
 
         return loss.item()
@@ -129,20 +146,21 @@ class HGP(BaseModel):
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 with torch.no_grad():
                     pre_logits = self.network(inputs, pen=True, train=False)
-                outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt]
-                labels = labels % self.cpt
-                loss = F.cross_entropy(outputs, labels)
+                outputs = self.network.last(pre_logits)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                loss = F.cross_entropy(outputs, labels - self.cur_offset)
                 self.optimizer.zero_grad()
                 self.fabric.backward(loss)
                 self.optimizer.step()
 
     def begin_task(self, n_classes_per_task: int):
-        super().begin_task(n_classes_per_task)
+        #super().begin_task(n_classes_per_task)
+        self.cur_task += 1
         if self.cur_task > 0:
-            self.network.prompt.process_task_count()
+            self.cur_offset += self.cpt[-1]
+        self.cpt.append(n_classes_per_task)
         if self.do_linear_probe:
             self.done_linear_probe = False
-
+        
     def end_round_server(self, client_info: List[dict]):
         if self.avg_type == "weighted":
             total_samples = sum([client["num_train_samples"] for client in client_info])
@@ -160,7 +178,7 @@ class HGP(BaseModel):
         clients_gaussians = [client["client_statistics"] for client in client_info]
         self.to(self.device)
         mogs = {}
-        for clas in range(self.cur_offset, self.cur_offset + self.cpt):
+        for clas in range(self.cur_offset, self.cur_offset + self.cpt[-1]):
             counter = 0
             for client_gaussians in clients_gaussians:
                 if client_gaussians.get(clas) is not None:
@@ -180,83 +198,104 @@ class HGP(BaseModel):
             if mogs.get(clas) is not None:
                 mogs[clas][0] = [mogs[clas][0][i] / counter for i in range(len(mogs[clas][0]))]
         self.mogs_per_task[self.cur_task] = mogs
-        optimizer = torch.optim.SGD(self.network.last.parameters(), lr=0.01, momentum=0.9, weight_decay=0)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
+        optimizer = torch.optim.SGD(self.network.last.parameters(), lr=self.rebalance_lr, momentum=0.9, weight_decay=0)
+        #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=5)
         logits_norm = torch.tensor([], dtype=torch.float32).to(self.device)
-        for epoch in range(5):
-            sampled_data = []
-            sampled_label = []
-            # TODO: fix the probabilities of the classes
-            # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
-            # we can set classes_weights asequiprobable
-            num_classes = (self.cur_task + 1) * self.cpt
-            classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
-            classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
-            _, classes_samples = torch.unique(classes_samples, return_counts=True)
-            # sample features from gaussians:
-            for task in range(self.cur_task + 1):
-                for clas in range(self.cpt):
-                    if self.mogs_per_task[task].get([task * self.cpt + clas][0]) is None:
-                        #print("No gaussian for class ", task * self.cpt + clas)
-                        continue
-                    weights_list = []
-                    for weight in self.mogs_per_task[task][task * self.cpt + clas][0]:
-                        weights_list.append(weight)
-                    gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
-                    weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
-                    gaussian_samples_fill = torch.multinomial(
-                        weights_list, classes_samples[task * self.cpt + clas], replacement=True
-                    )
-                    gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
-                    gaussian_samples[gaussian_clients] += gaussian_samples_fill
-                    for id, (mean, variance) in enumerate(
-                        zip(
-                            self.mogs_per_task[task][task * self.cpt + clas][1],
-                            self.mogs_per_task[task][task * self.cpt + clas][2],
-                        )
-                    ):
-                        cls_mean = mean  # * (0.9 + decay)
-                        cls_var = variance
-                        if self.full_cov:
-                            cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
+        if getattr(self, "history_classes", None) is None:
+            self.history_classes = torch.zeros(self.cpt[-1], dtype=torch.float32).to(self.device)
+        if self.history_classes.shape[0] < self.cur_offset + self.cpt[-1]:
+            self.history_classes = torch.cat(
+                (self.history_classes, torch.zeros(self.cur_offset + self.cpt[-1] - self.history_classes.shape[0], dtype=torch.float32).to(self.device))
+            )
+        cur_seen_classes = torch.stack([client_info[i]["seen_classes"] for i in range(len(client_info))]).sum(0)
+        self.history_classes[self.cur_offset : self.cur_offset + self.cpt[-1]] = cur_seen_classes
+        with tqdm(total=self.rebalance_epochs) as pbar:
+            for epoch in range(self.rebalance_epochs):
+                pbar.set_description(f"Rebalancing epoch {epoch}")
+                sampled_data = []
+                sampled_label = []
+                # TODO: fix the probabilities of the classes
+                # since Cifar100 and Tiny-ImageNet are balanced datasets and the participation rate is 100%,
+                # we can set classes_weights asequiprobable
+                num_classes = sum(self.cpt)
+                #classes_weights = torch.ones(num_classes, dtype=torch.float32).to(self.device)
+                classes_weights = self.history_classes
+                classes_samples = torch.multinomial(classes_weights, self.how_many * num_classes, replacement=True)
+                _, classes_samples = torch.unique(classes_samples, return_counts=True)
+                # sample features from gaussians:
+                initial_task = 0 if not self.reb_only_cur else self.cur_task
+                final_task = self.cur_task + 1 if not self.reb_only_old else self.cur_task
+                if initial_task != final_task:
+                    for task in range(initial_task, final_task):
+                        for clas in range(self.cpt[task]):
+                            cur_oft = sum(self.cpt[:task])
+                            if self.mogs_per_task[task].get([cur_oft + clas][0]) is None:
+                                #print("No gaussian for class ", cur_oft + clas)
+                                continue
+                            weights_list = []
+                            for weight in self.mogs_per_task[task][cur_oft + clas][0]:
+                                weights_list.append(weight)
+                            gaussian_samples = torch.zeros(len(weights_list), dtype=torch.int64).to(self.device)
+                            weights_list = torch.tensor(weights_list, dtype=torch.float32).to(self.device)
+                            gaussian_samples_fill = torch.multinomial(
+                                weights_list, classes_samples[cur_oft + clas], replacement=True
+                            )
+                            gaussian_clients, gaussian_samples_fill = torch.unique(gaussian_samples_fill, return_counts=True)
+                            gaussian_samples[gaussian_clients] += gaussian_samples_fill
+                            for id, (mean, variance) in enumerate(
+                                zip(
+                                    self.mogs_per_task[task][cur_oft + clas][1],
+                                    self.mogs_per_task[task][cur_oft + clas][2],
+                                )
+                            ):
+                                cls_mean = mean  # * (0.9 + decay)
+                                cls_var = variance
+                                if self.full_cov:
+                                    cov = cls_var + 1e-8 * torch.eye(cls_mean.shape[-1]).to(self.device)
+                                else:
+                                    cov = torch.eye(cls_mean.shape[-1]).to(self.device) * (cls_var + 1e-8) * 3
+                                m = MultivariateNormal(cls_mean, cov)
+                                n_samples = int(torch.round(gaussian_samples[id]))
+                                sampled_data_single = m.sample((n_samples,))
+                                sampled_data.append(sampled_data_single)
+                                sampled_label.extend([cur_oft + clas] * n_samples)
+                    sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
+                    sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
+                    inputs = sampled_data
+                    targets = sampled_label
+
+                    sf_indexes = torch.randperm(inputs.size(0))
+                    inputs = inputs[sf_indexes]
+                    targets = targets[sf_indexes]
+                    crct_num = sum(self.cpt)
+                    for _iter in range(crct_num):
+                        inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
+                        tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
+                        if self.reb_only_cur:
+                            outputs = self.network.last(inp)[:, self.cur_offset : self.cur_offset + self.cpt[-1]]
+                            tgt = tgt - self.cur_offset
+                        elif self.reb_only_old:
+                            outputs = self.network.last(inp)[:, :self.cur_offset]
                         else:
-                            cov = torch.eye(cls_mean.shape[-1]).to(self.device) * cls_var * 3
-                        m = MultivariateNormal(cls_mean, cov)
-                        n_samples = int(torch.round(gaussian_samples[id]))
-                        sampled_data_single = m.sample((n_samples,))
-                        sampled_data.append(sampled_data_single)
-                        sampled_label.extend([clas + task * self.cpt] * n_samples)
-            sampled_data = torch.cat(sampled_data, 0).float().to(self.device)
-            sampled_label = torch.tensor(sampled_label, dtype=torch.int64).to(self.device)
-            inputs = sampled_data
-            targets = sampled_label
+                            outputs = self.network.last(inp)
+                        logits = outputs
+                        per_task_norm = []
+                        cur_t_size = sum(self.cpt)
+                        temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
+                        per_task_norm.append(temp_norm)
+                        per_task_norm = torch.cat(per_task_norm, dim=-1)
+                        logits_norm = torch.cat((logits_norm, per_task_norm.mean(dim=0, keepdim=True)), dim=0)
+                        norms = per_task_norm.mean(dim=-1, keepdim=True)
 
-            sf_indexes = torch.randperm(inputs.size(0))
-            inputs = inputs[sf_indexes]
-            targets = targets[sf_indexes]
-            crct_num = (self.cur_task + 1) * self.cpt
-            for _iter in range(crct_num):
-                inp = inputs[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                tgt = targets[_iter * self.how_many : (_iter + 1) * self.how_many].to(self.device)
-                outputs = self.network.last(inp)
-                logits = outputs
-                per_task_norm = []
-                cur_t_size = 0
-                for _ti in range(self.cur_task + 1):
-                    cur_t_size += self.cpt
-                temp_norm = torch.norm(logits[:, :cur_t_size], p=2, dim=-1, keepdim=True)
-                per_task_norm.append(temp_norm)
-                per_task_norm = torch.cat(per_task_norm, dim=-1)
-                logits_norm = torch.cat((logits_norm, per_task_norm.mean(dim=0, keepdim=True)), dim=0)
-                norms = per_task_norm.mean(dim=-1, keepdim=True)
-
-                norms_all = torch.norm(logits[:, :crct_num], p=2, dim=-1, keepdim=True)
-                decoupled_logits = torch.div(logits[:, :crct_num] + 1e-12, norms + 1e-12) / self.logit_norm
-                loss = F.cross_entropy(decoupled_logits, tgt)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            scheduler.step()
+                        norms_all = torch.norm(logits[:, :crct_num], p=2, dim=-1, keepdim=True)
+                        decoupled_logits = torch.div(logits[:, :crct_num] + 1e-12, norms + 1e-12) / self.logit_norm
+                        loss = F.cross_entropy(decoupled_logits, tgt)
+                        pbar.set_postfix({"loss": loss.item()})
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()
+                    #scheduler.step()
+                pbar.update(1)
 
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
@@ -267,12 +306,14 @@ class HGP(BaseModel):
             self.done_linear_probe = True
             # restore correct optimizer
         params = [{"params": self.network.last.parameters()}, {"params": self.network.prompt.parameters()}]
-        optimizer = self.optimizer_class(params, lr=1e-3, weight_decay=0)
+        #params = [{"params": self.network.last.parameters()}]
+        optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=0)
         self.optimizer = self.fabric.setup_optimizers(optimizer)
-        self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        #self.scheduler = CosineSchedule(self.optimizer, self.num_epochs)
+        self.seen_classes = torch.zeros(self.cpt[-1], dtype=torch.float32).to(self.device)
 
     def end_epoch(self):
-        self.scheduler.step()
+        #self.scheduler.step()
         return None
 
     def get_client_info(self, dataloader: DataLoader):
@@ -280,6 +321,7 @@ class HGP(BaseModel):
             "params": self.network.get_params(),
             "num_train_samples": len(dataloader.dataset.data),
             "client_statistics": self.clients_statistics,
+            "seen_classes": self.seen_classes,
         }
 
     def get_server_info(self):

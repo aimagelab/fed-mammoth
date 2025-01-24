@@ -9,6 +9,7 @@ from utils.tools import str_to_bool
 from _networks.vit_prompt_hgp import VitHGP
 from _networks.vit import VisionTransformer
 from _models.fedavg import FedAvg
+from copy import deepcopy
 
 """
 Centralized implementation of FedProto. In this case, clients also share their model, which is aggregated by the server and 
@@ -49,7 +50,7 @@ class FedProto(FedAvg):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         super().begin_round_client(dataloader, server_info)
         if "prototypes" in server_info:
-            self.global_proto[self.cur_task] = server_info["prototypes"]
+            self.global_proto[self.cur_task] = deepcopy(server_info["prototypes"])
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
         self.optimizer.zero_grad()

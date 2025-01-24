@@ -82,6 +82,7 @@ class LoRM(Lora, RegMean):
             only_square,
             train_bias,
             clip_grad,
+            regmean_rounds
         )
         self.middle_names = {}
         for name in self.gram_modules:
@@ -229,8 +230,7 @@ class LoRM(Lora, RegMean):
             self.optimization_dict[key] = self.head[key]
         for name in self.gram_modules:
             self.features[name] = self.features[name].to(self.device)
-        for i in range(self.regmean_rounds):
-            RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
+        RegMean.end_round_client(self, dataloader)  # retrieves Gram matrices from hooks
         self.to("cpu", only_trainable=False)
 
     def end_round_server(self, client_info: List[dict]):
