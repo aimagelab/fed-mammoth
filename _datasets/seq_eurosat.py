@@ -122,6 +122,11 @@ class SequentialEuroSAT(BaseDataset):
                 download=True,
                 transform=self.BASE_TRANSFORM,
             )
+            # Aggiungo .classes e .class_to_idx che uso per recuperare i nomi e indici delle classi
+            dataset.classes = ["Annual Crop Land", "Forest", "Herbaceous Vegetation Land", "Highway or Road",
+                               "Industrial Buildings", "Pasture Land", "Permanent Crop Land", "Residential Buildings",
+                               "River", "Sea or Lake"]
+            dataset.class_to_idx = {cl: i for i,cl in enumerate(dataset.classes)}
             setattr(self, f"{split}_dataset", dataset)
 
         self._split_fcil(

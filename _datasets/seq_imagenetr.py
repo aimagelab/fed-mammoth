@@ -141,6 +141,8 @@ class SequentialImageNetR(BaseDataset):
                 download=True,
                 transform=self.BASE_TRANSFORM,
             )
+            dataset.classes = [i for i in range(200)]
+            dataset.class_to_idx = {cl: i for i, cl in enumerate(dataset.classes)}
             setattr(self, f"{split}_dataset", dataset)
 
         self._split_fcil(
