@@ -70,7 +70,9 @@ class CocoAvg(BaseModel):
         self.weight_on_gradient_per_layer = weight_on_gradient_per_layer
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor, update: bool = True) -> float:
+        self.optimizer.zero_grad()
         with self.fabric.autocast():
+            inputs = self.augment(inputs)
             outputs = self.network(inputs)[:, self.cur_offset : self.cur_offset + self.cpt]
             loss = self.loss(outputs, labels - self.cur_offset)
 
@@ -84,7 +86,7 @@ class CocoAvg(BaseModel):
             cur_small_omega = torch.cat(grads).data
             cur_small_omega = torch.nan_to_num(cur_small_omega, 0)
             self.optimizer.step()
-            self.optimizer.zero_grad()
+
             cur_small_omega *= (pre_params - self.network.get_params().detach().data.clone())
             self.small_omega += cur_small_omega
 
@@ -150,6 +152,7 @@ class CocoAvg(BaseModel):
         # Evaluate the cumulated gradient for every parameter
         # to weight more the bigger changes
 
+
         little_omegas_sum = 0
         for client in client_info:
             little_omegas_sum += client["small_omega"]
@@ -166,13 +169,13 @@ class CocoAvg(BaseModel):
             cl_weighted_params = cl_weighted_params * little_omegas_normed
             weighted_parameters += cl_weighted_params
 
-        return weighted_parameters.to(self.device)
+        return weighted_parameters
 
 
     def clients_layer_cumulated_gradient_weights(self, client_info, norm_weights):
         # Evaluate the cumulated gradient for every layer
         # to weight more the bigger changes
-        weighted_parameters = torch.empty((len(client_info), 0))
+        weighted_parameters = torch.empty(0)
 
         position_count = 0
         for l_n in self.layers_names:
@@ -185,16 +188,15 @@ class CocoAvg(BaseModel):
             if total_gradient == 0:
                 weights = torch.tensor([1 / len(client_info) for cl in client_info])
             else:
-                weights = (1 - self.gamma_gr_numcl) * (cumulated_gradients / total_gradient) + (self.gamma_gr_numcl * norm_weights)
+                weights = (1 - self.gamma_gr_numcl) * (cumulated_gradients / total_gradient) + (self.gamma_gr_numcl * torch.from_numpy(np.asarray(norm_weights)))
 
-            original_parameters = torch.stack([cl["params"][:, position_count:position_count + layer_length] for cl in client_info])
+            original_parameters = torch.stack([cl["params"][position_count:position_count + layer_length] for cl in client_info])
             weighted_parameters = torch.cat((weighted_parameters,
-                                             (original_parameters[:,
-                                              position_count:position_count + layer_length].T * weights.cpu()).T.sum(axis=0)))
+                                             (original_parameters.T * weights.cpu()).T.sum(axis=0)))
 
             position_count = position_count + layer_length
 
-        return weighted_parameters
+        return weighted_parameters.to(torch.float16)
 
     def clients_sample_var_weights(self, client_info, all_classes):
         total_vars_per_class = {
@@ -241,16 +243,18 @@ class CocoAvg(BaseModel):
 
         # Entropy comes from the evaluation of class distribution for each client.
         # If beta_entropy = 1 -> it weights completely with respect to entropy
-        print("start evaluating entropy")
-        clients_entropy = self.class_distribution_entropy(client_info, all_classes)
-        weights_en = clients_entropy
-        if sum(weights_en) == 0:
-            weights_en = [x + 0.01 for x in weights_en]
-        norm_weights_en = [w / sum(weights_en) for w in weights_en]
 
-        norm_weights = [(1 - self.beta_entropy) * w + self.beta_entropy * e_w
-                        for w, e_w in zip(norm_weights, norm_weights_en)]
-        print("end evaluating entropy")
+        if self.beta_entropy>0:
+            print("start evaluating entropy")
+            clients_entropy = self.class_distribution_entropy(client_info, all_classes)
+            weights_en = clients_entropy
+            if sum(weights_en) == 0:
+                weights_en = [x + 0.01 for x in weights_en]
+            norm_weights_en = [w / sum(weights_en) for w in weights_en]
+
+            norm_weights = [(1 - self.beta_entropy) * w + self.beta_entropy * e_w
+                            for w, e_w in zip(norm_weights, norm_weights_en)]
+            print("end evaluating entropy")
 
         # Here I differenciate the different merged_weights techniques
         # if weight_on_pars_distance=True it uses the distance in space from the previous round for each parameter to weight more the parameters that changed more
@@ -266,9 +270,13 @@ class CocoAvg(BaseModel):
             elif self.weight_on_gradient_per_layer:
                 merged_weights = self.clients_layer_cumulated_gradient_weights(client_info, norm_weights)
             else:
-                merged_weights = 0
-                for client, norm_weight in zip(client_info, norm_weights):
-                    merged_weights += client["params"] * norm_weight
+                # aderenza al codice di fedavg
+                merged_weights = torch.stack(
+                                            [client["params"] * norm_weight for client, norm_weight in zip(client_info, norm_weights)]
+                                        ).sum(0)
+                # merged_weights = 0
+                # for client, norm_weight in zip(client_info, norm_weights):
+                #     merged_weights += client["params"] * norm_weight
             self.network.set_params(merged_weights)
 
             if self.avg_type == "class_weighted":
@@ -285,6 +293,10 @@ class CocoAvg(BaseModel):
     def begin_round_client(self, dataloader: DataLoader, server_info: dict):
         self.network.set_params(server_info["params"])
         self.small_omega = 0
+        params = [{"params": self.network.parameters()}]
+        optimizer = self.optimizer_class(params, lr=self.lr, weight_decay=self.wd)
+        self.optimizer = self.fabric.setup_optimizers(optimizer)
+
         if self.do_linear_probe and not self.done_linear_probe:
             optimizer = self.optimizer_class(self.network.last.parameters(), lr=self.lr, weight_decay=self.wd)
             self.optimizer = self.fabric.setup_optimizers(optimizer)
@@ -317,6 +329,7 @@ class CocoAvg(BaseModel):
                     gaussians.append(number)
                     gaussians.append(torch.mean(features[true_labels == client_label], 0))
                     gaussians.append(torch.std(features[true_labels == client_label], 0) ** 2)
+                    # gaussians.append(torch.std(features, 0) ** 2) #TODO togliere: è un test per capire quanto impatta considerare solo i casi in cui la previsione è giusta
                     client_statistics[client_label] = gaussians
             self.clients_statistics = client_statistics
 
