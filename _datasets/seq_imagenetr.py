@@ -35,6 +35,7 @@ class MyImageNetR(Dataset):
         self.train = train
         self.transform = transform
         self.download = download
+        self.yaml_files = "./imagenet_r_utils"
 
         if not os.path.exists(self.root + "/imagenet-r") and self.download:
             print("Downloading ImageNetR...", file=sys.stderr)
@@ -56,26 +57,13 @@ class MyImageNetR(Dataset):
             # Remove the downloaded tarfile
             os.remove(self.root + "/imagenet-r.tar")
 
-            # downlaod split file form "https://drive.google.com/file/d/1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q/view?usp=sharing"
-            gdd.GoogleDriveDownloader.download_file_from_google_drive(
-                file_id="1iNNgknmhWQm-xAvsmMimtyGMQPNS2E_Q",
-                dest_path=self.root + "/imagenet-r/imagenet-r_train.yaml",
-                showsize=True,
-            )
-
-            # downlaod split file form "https://drive.google.com/file/d/1zXVayHfggvJfmyq-plBV6y3HhXiKVdLo/view?usp=sharing"
-            gdd.GoogleDriveDownloader.download_file_from_google_drive(
-                file_id="1zXVayHfggvJfmyq-plBV6y3HhXiKVdLo",
-                dest_path=self.root + "/imagenet-r/imagenet-r_test.yaml",
-                showsize=True,
-            )
 
             print("Done.", file=sys.stderr)
 
         if self.train:
-            data_config = yaml.load(open(self.root + "/imagenet-r/imagenet-r_train.yaml"), Loader=yaml.Loader)
+            data_config = yaml.load(open(self.yaml_files + "/imagenet-r_train.yaml"), Loader=yaml.Loader)
         else:
-            data_config = yaml.load(open(self.root + "/imagenet-r/imagenet-r_test.yaml"), Loader=yaml.Loader)
+            data_config = yaml.load(open(self.yaml_files + "/imagenet-r_test.yaml"), Loader=yaml.Loader)
 
         # resize = transforms.RandomResizedCrop(224, interpolation=InterpolationMode.BICUBIC)
         # [resize(Image.open(img).convert("RGB")) for img in data_config["data"]]
