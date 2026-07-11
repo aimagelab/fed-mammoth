@@ -39,8 +39,35 @@
 + CODA-Prompt
 + TARGET
 + PILoRA
++ HGP
 + LoRM
 + Many more to add...
+
+## Cite Us
+
+If you use this codebase, please consider citing our works:
+
+```bibtex
+@inproceedings{salami2025closed,
+  author = {Salami, Riccardo and Buzzega, Pietro and Mosconi, Matteo and Bonato, Jacopo and Sabetta, Luigi and Calderara, Simone},
+  booktitle = {International Conference on Learning Representations},
+  editor = {Y. Yue and A. Garg and N. Peng and F. Sha and R. Yu},
+  pages = {86612--86637},
+  title = {Closed-Form Merging of Parameter-Efficient Modules for Federated Continual Learning},
+  url = {[https://proceedings.iclr.cc/paper_files/paper/2025/file/d79b8c42f61b51722992705022134ef3-Paper-Conference.pdf](https://proceedings.iclr.cc/paper_files/paper/2025/file/d79b8c42f61b51722992705022134ef3-Paper-Conference.pdf)},
+  volume = {2025},
+  year = {2025}
+}
+
+@article{salami2025federated,
+  title={Federated Class-Incremental Learning with Hierarchical Generative Prototypes},
+  author={Riccardo Salami and Pietro Buzzega and Matteo Mosconi and Mattia Verasani and Simone Calderara},
+  journal={Transactions on Machine Learning Research},
+  issn={2835-8856},
+  year={2025},
+  url={[https://openreview.net/forum?id=k2TT42Ei8W](https://openreview.net/forum?id=k2TT42Ei8W)} 
+}
+```
 
 ## In order to run LoRM and replicate the results, use the following lines:
 
